@@ -1,4 +1,4 @@
-# My Own Python Language
+# My own python language
 My own programming language in racket.
 Academic project in colaboration with:
 
