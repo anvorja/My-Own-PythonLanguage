@@ -1,4 +1,6 @@
 #lang eopl
+
+;******************************************************************************************
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos y recursion
 
 ;; La definición BNF para las expresiones del lenguaje:
@@ -29,6 +31,8 @@
 ;;                      <letrec-exp proc-names idss bodies letrec-body>
 ;;                  ::= invocar(<expression> (<expression>)*(,))
 ;;                      <app-exp proc rands>
+;;                  ::= super identifier({identifier>}*(,))
+;;                      <super-call-exp method-name rands>
 ;; <expr-bool>      ::= pred-prim ( expression , expression )
 ;;                      <comp-pred (pred-prim rand1 rand2)>
 ;;                  ::= oper-bin-bool ( expr-bool , expr-bool )
@@ -55,6 +59,20 @@
 ;;                      <prim-ref-list (list pos)>
 ;;                  ::= set-lista(<expression>,<expression>,<expression>)
 ;;                      <prim-ref-list (list pos value)>
+;; <tuple-prim>     ::= vacio?-tupla(<expression>)
+;;                      <prim-empty-tuple (tuple)>
+;;                  ::= vacio-tuple()
+;;                      <prim-make-empty-tuple>
+;;                  ::= crear-tupla({<expression>}* (,))
+;;                      <prim-make-tuple (elem)>
+;;                  ::= tupla?(<expression>)
+;;                      <tuple-prim? (exp)>
+;;                  ::= cabeza-tupla(<expression>)
+;;                      <prim-head-tuple (exp)>
+;;                  ::= cola-tupla(<expression>)
+;;                      <prim-tail-tuple (exp)>
+;;                  ::= ref-tuple <expression>,<expression>)
+;;                      <prim-ref-tuple (tuple pos)>
 ;; <regs-prim>      ::= registros?(<expression>)
 ;;                      <prim-regs?-registro (exp)>
 ;;                  ::= crear-registro({<identificador> =<expresion>}+(,))
@@ -110,6 +128,8 @@
     (expression (expr-bool) boolean-expr)
     (expression ("["(separated-list expression ";") "]") lista)
     (expression (list-prim) prim-list-exp)
+    (expression ("tupla("(separated-list expression ";") ")") tupla)
+    (expression (tuple-prim) prim-tuple-exp)
     (expression ("{"identifier "=" expression (arbno ";" identifier "=" expression) "}") registro)
     (expression (regs-prim) prim-registro-exp)
     (expression ("if" expression "then" expression "else" expression "endif") if-exp)
@@ -158,16 +178,24 @@
     (list-prim ("append-lista""("expression "," expression")") prim-append-list);append-lista([<elem1>,<elem2>,<elem3>,...],[<elemA>,<elemB>,<elemC>,...])-> <elem1>,<elem2>,<elem3>,...,<elemA>,<elemB>,<elemC>,...
     (list-prim ("ref-lista""("expression "," expression")") prim-ref-list);ref-lista(<lista>, pos)
     (list-prim ("set-lista""("expression "," expression "," expression ")") prim-set-list);set-lista(<lista>, pos, value)
+    ;;;;;; Tuplas
+    (tuple-prim ("vacio?-tupla" "("expression")") prim-empty-tuple)
+    (tuple-prim ("vacio-tupla" "("")") prim-make-empty-tuple)
+    (tuple-prim ("crear-tupla" "("(separated-list expression ",") ")") prim-make-tuple); crear-tupla(<elem1>,<elem2>,<elem3>,...)
+    (tuple-prim ("tupla?" "("expression")") prim-tuple?-tuple); tupla?(<tupla>)-> Bool
+    (tuple-prim ("cabeza-tupla""(" expression")") prim-head-tuple);cabeza-tupla(<tupla>)-> <elem1>
+    (tuple-prim ("cola-tupla" "(" expression")") prim-tail-tuple);cola-tupla(<lista>)-> <elem2>,<elem3>,...
+    (tuple-prim ("ref-tupla""("expression "," expression")") prim-ref-tuple);ref-tupla(<lista>, pos)
     ;;;;;;Registros
-
     (regs-prim ("registros?" "(" expression ")") prim-regs?-registro)
     (regs-prim ("crear-registro" "(" identifier "=" expression (arbno "," identifier "=" expression) ")") prim-make-registro)
     (regs-prim ("ref-registro" "(" expression ","expression ")") prim-ref-registro); ref-registro(<registro>,<id>) -> <value>
     (regs-prim ("set-registro" "(" expression ","expression","expression ")") prim-set-registro); set-registro(<registro>,<id>, <new-value>)
 
     ;;;;;POO
-    (class-decl ("clase" identifier "hereda" identifier (arbno "prop" identifier) (arbno method-decl)) a-class-decl)
-    (method-decl ("metodo" identifier "("  (separated-list identifier ",") ")" "{" expression "}")a-method-decl)
+    (class-decl ("clase" identifier "hereda" identifier (arbno "campo" identifier) (arbno method-decl)) a-class-decl)
+    (method-decl ("metodo" identifier "(" (separated-list identifier ",") ")" "{" expression "}")a-method-decl)
+    (expression ("super" identifier "(" (separated-list identifier ",") ")") super-call-exp)
     (expression ("mostrar") mostrar-exp)
 
   )
@@ -241,6 +269,9 @@
       (lista (list-elements)
              (list->vector (map (lambda (element) (eval-expression element env) ) list-elements)))
       (prim-list-exp (datum) (eval-prim-list datum env))
+      (tupla (elements)elements
+             (list->vector (map (lambda (element) (eval-expression element env) ) elements)))
+      (prim-tuple-exp(a) (eval-prim-tuple a env))
       (registro (first-id first-value rest-id rest-value) (list (cons first-id rest-id)
                                                                 (list->vector (map (lambda (element) (eval-expression element env) ) (cons first-value rest-value)))))
       (prim-registro-exp (regs-prim) (eval-regs-prim regs-prim env))
@@ -291,6 +322,12 @@
                                    (extend-env-recursively proc-names idss bodies env)))
 
       (new-object-exp (id args) #t)
+
+      (super-call-exp (method-name rands)
+        (let ((args (eval-rands rands env))
+              (obj (apply-env env 'self)))
+          (find-method-and-apply
+            method-name (apply-env env '%super) obj args)))
 
       (mostrar-exp () the-class-env)
       (else 1))))
@@ -360,6 +397,30 @@
                                  "index ~s out of range [0:~s)"  (eval-expression pos env) (vector-length (eval-expression list env)))
                                  (vector-set! (eval-expression list env) (eval-expression pos env) (eval-expression value env))))
     )))
+
+;; evalua las primitivas sobre tuplas
+(define eval-prim-tuple
+  (lambda (primitiva env)
+    (cases tuple-prim primitiva
+      (prim-make-empty-tuple () (make-vector 0))
+      (prim-empty-tuple (exp) (= (vector-length (eval-expression exp env)) 0))
+      (prim-make-tuple (tuple-elem) (list->vector(map (lambda (elem) (eval-expression elem env)) tuple-elem)))
+      (prim-tuple?-tuple (exp) (vector? (eval-expression exp env)))
+      (prim-head-tuple (exp) (if (= (vector-length (eval-expression exp env)) 0)
+                                (eopl:error 'eval-expression
+                                 "cannot get the head of an empty list" )
+                                (vector-ref (eval-expression exp env) 0)))
+
+      (prim-tail-tuple (exp) (if (= (vector-length (eval-expression exp env)) 0)
+                                (make-vector 0)
+                                (list->vector(cdr (vector->list (eval-expression exp env))))))
+
+     (prim-ref-tuple (tuple pos) (if (>= (eval-expression pos env) (vector-length (eval-expression tuple env)))
+                                (eopl:error 'eval-expression
+                                 "index ~s out of range [0:~s)"  (eval-expression pos env) (vector-length (eval-expression tuple env)))
+                                (vector-ref (eval-expression tuple env) (eval-expression pos env))))
+    )))
+
 
 ;;
 (define eval-regs-prim
@@ -547,6 +608,9 @@
       (lista (list-elements)
              #f)
       (prim-list-exp (datum) #f)
+      (tupla (list-elements)
+             #f)
+      (prim-tuple-exp (datum) #f)
       (registro (first-id first-value rest-id rest-value) #f)
       (prim-registro-exp (regs-prim) #f)
       (if-exp (test-exp true-exp false-exp)
@@ -582,8 +646,8 @@
       (letrec-exp (proc-names idss bodies letrec-body)
                   (searchUpdateValExp letrec-body))
       (new-object-exp (id args) #f)
-
       (mostrar-exp () #f)
+      (super-call-exp (method-name rands) #f)
     )
   )
 )
@@ -627,7 +691,7 @@
             (iota len) idss bodies)
           env)))))
 
-;;Ambiente de declaracion de clases
+;; Ambiente de declaracion de clases
 
 (define the-class-env '())
 
@@ -641,16 +705,93 @@
       (cond
         ((null? env)
          (eopl:error 'lookup-class
-           "Unknown class ~s" name))
+           "Clase desconocida ~s" name))
         ((eqv? (class-decl->class-name (car env)) name) (car env))
         (else (loop (cdr env)))))))
 
-;;auxiliares para el manejo de clases
+;; Ambiente de métodos
+
+(define lookup-method-decl
+  (lambda (m-name m-decls)
+    (cond
+      ((null? m-decls) #f)
+      ((eqv? m-name (method-decl->method-name (car m-decls)))
+       (car m-decls))
+      (else (lookup-method-decl m-name (cdr m-decls))))))
+
+;; Auxiliares para el manejo de declaraciones de clases y métodos
+
 (define class-decl->class-name
   (lambda (c-decl)
     (cases class-decl c-decl
       (a-class-decl (class-name super-name field-ids m-decls)
         class-name))))
+
+(define class-decl->super-name
+  (lambda (c-decl)
+    (cases class-decl c-decl
+      (a-class-decl (class-name super-name field-ids m-decls)
+        super-name))))
+
+(define class-decl->field-ids
+  (lambda (c-decl)
+    (cases class-decl c-decl
+      (a-class-decl (class-name super-name field-ids m-decls)
+        field-ids))))
+
+(define class-decl->method-decls
+  (lambda (c-decl)
+    (cases class-decl c-decl
+      (a-class-decl (class-name super-name field-ids m-decls)
+        m-decls))))
+
+(define method-decl->method-name
+  (lambda (md)
+    (cases method-decl md
+      (a-method-decl (method-name ids body) method-name))))
+
+(define method-decl->ids
+  (lambda (md)
+    (cases method-decl md
+      (a-method-decl (method-name ids body) ids))))
+
+(define method-decl->body
+  (lambda (md)
+    (cases method-decl md
+      (a-method-decl (method-name ids body) body))))
+
+(define method-decls->method-names
+  (lambda (mds)
+    (map method-decl->method-name mds)))
+
+;; Métodos
+
+(define find-method-and-apply
+  (lambda (m-name host-name self args)
+    (if (eqv? host-name 'objeto)
+      (eopl:error 'find-method-and-apply
+        "No method for name ~s" m-name)
+      (let ((m-decl (lookup-method-decl m-name
+                      (class-name->method-decls host-name))))
+        (if (method-decl? m-decl)
+          (apply-method m-decl host-name self args)
+          (find-method-and-apply m-name
+            (class-name->super-name host-name)
+            self args))))))
+
+(define apply-method
+  (lambda (m-decl host-name self args)
+    #t))
+
+;; Selectores
+
+(define class-name->method-decls
+  (lambda (class-name)
+    (class-decl->method-decls (lookup-class class-name))))
+
+(define class-name->super-name
+  (lambda (class-name)
+    (class-decl->super-name (lookup-class class-name))))
 
 ;iota: number -> list
 ;función que retorna una lista de los números desde 0 hasta end
@@ -659,6 +800,15 @@
     (let loop ((next 0))
       (if (>= next end) '()
         (cons next (loop (+ 1 next)))))))
+
+(define extend-env-refs
+  (lambda (syms vec env)
+    (extended-env-record syms vec env)))
+
+(define-datatype part part?
+  (a-part
+    (class-name symbol?)
+    (fields vector?)))
 
 ;función que busca un símbolo en un ambiente
 (define apply-env
@@ -717,14 +867,18 @@
 (scan&parse "[1;or (<(1,0),>=(10,10))]")
 (scan&parse "vacio?-lista([1;or (<(1,0),>=(10,10))])")
 (scan&parse "set-lista([1;or (<(1,0),>=(10,10))],1,9)")
-
+;;___________________________________________
+;; tuplas
+(scan&parse "ref-tupla(crear-tupla(1, 2, 4,and (<(10,5),>(1,90))),3)")
+(scan&parse "vacio?-tupla(tupla(1;or (<(1,0),>=(10,10))))")
+(scan&parse "tupla?(vacio-tupla())")
+(scan&parse "cabeza-tupla( cola-tupla(tupla(1;2;3;4;5)))")
 ;;___________________________________________
 ;; registros
 (scan&parse "crear-registro(f=5,t=4,ff=90)")
 (scan&parse "{f=5;t=4;ff=90}")
 (scan&parse "registros?({f=5;t=4;ff=90})")
 (scan&parse "ref-registro({f=5;t=4;ff=90}, ff)")
-
 ;;___________________________________________
 ;; variables y constantes
 (scan&parse "variables
@@ -740,7 +894,22 @@
 ;; --> 13
 (scan&parse "letrec fact(n) = if ==(n,0) then 1 else (n * invocar( fact( (n~1) ) ) ) endif {invocar(fact(5))}")
 ;; --> 120
+
 ;;_____________________________________________
-;;Clases
-(scan&parse "clase perro hereda objeto prop azucar metodo ladrar(y){y} mostrar")
+;; clases
+(scan&parse "clase perro hereda objeto campo azucar metodo ladrar(y){y} mostrar")
 ;; --> (#(struct:a-class-decl perro objeto (azucar) (#(struct:a-method-decl ladrar (y) #(struct:var-exp y)))))
+(scan&parse "clase carro hereda objeto
+  campo numRuedas
+  campo marca
+  metodo conducir(chofer) {chofer}
+clase sedan hereda carro
+  campo numPuertas
+  metodo derrapar(chofer){super conducir(chofer)}
+mostrar")
+;; --> #(struct:a-program
+;;       (#(struct:a-class-decl carro objeto (numRuedas marca) (#(struct:a-method-decl conducir (chofer) #(struct:var-exp chofer))))
+;;        #(struct:a-class-decl sedan carro (numPuertas) (#(struct:a-method-decl derrapar (chofer) #(struct:super-call-exp conducir (chofer))))))
+;;       #(struct:mostrar-exp))
+
+(interpretador)
