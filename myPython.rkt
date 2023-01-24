@@ -31,8 +31,10 @@
 ;;                      <primapp-exp (prim rands)>
 ;;                  ::= if <expression> then <expression> else <expression> endif
 ;;                      <if-exp (test-exp true-exp false-exp)>
-;;                  ::= for <identificador> in range ( <number>, <number>) do {<expresion>} endfor
-;;                     <for-exp variable inicio final cuerpo>
+;;                  ::= begin {<expresion>}+(;) end
+;;                     <secuencia expSec>
+;;                  ::= for <identificador> = <expresion> <to-odownto> <expresion> do <expresion> done
+;;                      <for-exp (id exp1 to-odwto exp2 exp3)>
 ;;                  ::= while <expresion-bool> do { <expresion>}done
 ;;                     <while-exp expBoolWhile expWhile>
 ;;                  ::= proc({<identificador>}*(,)) { <expression> }
@@ -51,6 +53,8 @@
 
 ;;                  ::= base <num> ({number}* )
 ;;                      <base-exp>
+;;                  ::= "<cadena>"
+;;                      <cadena-exp (cadena)>
 
 ;; <expr-bool>      ::= pred-prim ( expression , expression )
 ;;                      <comp-pred (pred-prim rand1 rand2)>
@@ -137,52 +141,99 @@
 
 
 ;Especificación Sintáctica (gramática)
+
 (define grammar-simple-interpreter
-  '((program ((arbno class-decl) expression) a-program)
+  '(
+    ;;Programa
+    (program ((arbno class-decl) expression) a-program)
+
+    ;;Expression
     (expression (number) numero-lit)
-    (expression (txt)  texto-lit)
     (expression (identifier) var-exp)
+    (expression (txt)  texto-lit)
     (expression (uni-primitive "(" expression ")") primapp-un-exp)
     (expression ("(" expression bi-primitive expression ")") primapp-bi-exp)
     (expression (expr-bool) boolean-expr)
-    (expression ("["(separated-list expression ";") "]") lista)
+
     (expression (list-prim) prim-list-exp)
-    (expression ("tupla("(separated-list expression ";") ")") tupla)
+
     (expression (tuple-prim) prim-tuple-exp)
     (expression ("{"identifier "=" expression (arbno ";" identifier "=" expression) "}") registro)
     (expression (regs-prim) prim-registro-exp)
+
+    ;;if
     (expression ("if" expression "then" expression "else" expression "endif") if-exp)
-    ;for
-    (expression ("for" identifier "in range" "(" expression "," expression ") do" expression "endfor") for-exp)
+
+    ;;procedimiento
+    (expression ("proc" "(" (separated-list identifier ",") ")" "{" expression "}") proc-exp)
+
+    ;;evaluar
+    (expression ("invocar" "(" expression "(" (separated-list expression ",") ")" ")") app-exp)
+
+    ;;letrec
+    (expression ("letrec" (arbno identifier "(" (separated-list identifier ",") ")" "=" expression)  "{" expression "}") letrec-exp)
+
+    ;;const
+    (expression ("constantes" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") constanteLocal-exp)
+
+    ;;lista
+    (expression ("["(separated-list expression ";") "]") lista)
+
+    ;;tupla
+    (expression ("tupla("(separated-list expression ";") ")") tupla)
+
+
+    ;;begin
+    ;(expression ("begin" "{" expression ";" (arbno expression ";") "}" "end") secuencia-exp)
+
+    (expression ("begin" expression (arbno ";" expression) "end") begin-exp)
+
+    ;;print
+    (expression ("print" "(" expression ")") print-exp)
+
+    ;;for
+    (expression ("for" identifier "=" expression to-o-downto expression "do" expression "done") for-exp)
+    (to-o-downto ("to") to)
+    (to-o-downto ("downto") downto)
+
     ;while
     (expression ("while" "("expression")" "do" expression"end" ) while-exp)
+
     (expression ("variables" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") variableLocal-exp)
-    (expression ("constantes" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") constanteLocal-exp)
-    (expression ("proc" "(" (separated-list identifier ",") ")" "{" expression "}") proc-exp)
-    (expression ("letrec" (arbno identifier "(" (separated-list identifier ",") ")" "=" expression)  "{" expression "}") letrec-exp)
-    (expression ("invocar" "(" expression "(" (separated-list expression ",") ")" ")") app-exp)
-    (expression ("nuevo" identifier "(" (separated-list expression ",") ")") new-object-exp)
+
+
     (expression ("base" expression "(" (arbno expression) ")") base-exp)
 
     ;;;;;;
-    (expression ("actualizar" identifier "=" expression)
-                updateVar-exp)
+    (expression ("actualizar" identifier "=" expression)updateVar-exp)
     (expression ("bloque" "{" expression (arbno ";" expression) "}")
                 block-exp)
+
     ;;;;;;
     (expr-bool (pred-prim "(" expression "," expression ")") comp-pred)
     (expr-bool (oper-bin-bool "(" expr-bool "," expr-bool ")") comp-bool-bin)
     (expr-bool (bool) booleano-lit)
     (expr-bool (oper-un-bool "(" expr-bool ")") comp-bool-un)
-    ;;;;;;
+
+    ;(expression (primitiva "(" (separated-list expression ",") ")")  primapp-exp)
+
+    ;(primitiva ("print-obj") primitiva-print-obj)
+
+    ;(primitiva ("print")   primitiva-print)
+
+    ;------------primitivas binarias-------------
     (bi-primitive ("+") primitiva-suma)
     (bi-primitive ("~") primitiva-resta)
     (bi-primitive ("*") primitiva-multi)
     (bi-primitive ("/") primitiva-div)
     (bi-primitive ("concat") primitiva-concat)
+    (bi-primitive ("mod") primitiva-elmodulo)
+
+    ;------------primitivas unarias-------------
     (uni-primitive ("add1") primitiva-add1)
     (uni-primitive ("sub1") primitiva-sub1)
     (uni-primitive ("longitud") primitiva-longitud)
+
     ;;;;;;Booleanos
     (pred-prim ("<") prim-bool-menor)
     (pred-prim (">") prim-bool-mayor)
@@ -193,6 +244,7 @@
     (oper-bin-bool ("and") prim-bool-conj)
     (oper-bin-bool ("or") prim-bool-disy)
     (oper-un-bool ("not") prim-bool-neg)
+
     ;;;;;;Listas
     (list-prim ("vacio-lista" "("")") prim-make-empty-list)
     (list-prim ("vacio?-lista" "("expression")") prim-empty-list)
@@ -203,6 +255,7 @@
     (list-prim ("append-lista""("expression "," expression")") prim-append-list);append-lista([<elem1>,<elem2>,<elem3>,...],[<elemA>,<elemB>,<elemC>,...])-> <elem1>,<elem2>,<elem3>,...,<elemA>,<elemB>,<elemC>,...
     (list-prim ("ref-lista""("expression "," expression")") prim-ref-list);ref-lista(<lista>, pos)
     (list-prim ("set-lista""("expression "," expression "," expression ")") prim-set-list);set-lista(<lista>, pos, value)
+
     ;;;;;; Tuplas
     (tuple-prim ("vacio?-tupla" "("expression")") prim-empty-tuple)
     (tuple-prim ("vacio-tupla" "("")") prim-make-empty-tuple)
@@ -211,18 +264,31 @@
     (tuple-prim ("cabeza-tupla""(" expression")") prim-head-tuple);cabeza-tupla(<tupla>)-> <elem1>
     (tuple-prim ("cola-tupla" "(" expression")") prim-tail-tuple);cola-tupla(<lista>)-> <elem2>,<elem3>,...
     (tuple-prim ("ref-tupla""("expression "," expression")") prim-ref-tuple);ref-tupla(<lista>, pos)
+
     ;;;;;;Registros
     (regs-prim ("registros?" "(" expression ")") prim-regs?-registro)
     (regs-prim ("crear-registro" "(" identifier "=" expression (arbno "," identifier "=" expression) ")") prim-make-registro)
     (regs-prim ("ref-registro" "(" expression ","expression ")") prim-ref-registro); ref-registro(<registro>,<id>) -> <value>
     (regs-prim ("set-registro" "(" expression ","expression","expression ")") prim-set-registro); set-registro(<registro>,<id>, <new-value>)
 
-    ;;;;;POO
+    ;;;;;;;;;;;;;OOP;;;;;;;;;;;;;
+
+    ;;class-decl
     (class-decl ("clase" identifier "hereda" identifier (arbno "campo" identifier) (arbno method-decl)) a-class-decl)
+
+    ;;method-decl
     (method-decl ("metodo" identifier "(" (separated-list identifier ",") ")" "{" expression "}")a-method-decl)
+
+    ;;new-object
     (expression ("new" identifier "(" (separated-list expression ",") ")") new-object-exp)
+
+    ;;super-call
     (expression ("super" identifier "(" (separated-list identifier ",") ")") super-call-exp)
+
+    ;;method-app-exp
     (expression ("send" expression identifier "("  (separated-list expression ",") ")") method-app-exp)
+
+    ;;
     (expression ("mostrar") mostrar-exp)
 
   )
@@ -279,51 +345,100 @@
 
 ; eval-expression: <expression> <enviroment> -> numero
 ; evalua la expresión en el ambiente de entrada
+
 (define eval-expression
   (lambda (exp env)
     (cases expression exp
+
       (numero-lit (datum) datum)
+
       (texto-lit (datum) (substring datum 1 (-(string-length datum) 1)))
+
       (var-exp (id) (apply-env  env id))
+
       (primapp-un-exp (prim rand)
           (let ((arg (eval-primapp-exp-rand rand env)))
                (apply-uni-primitive prim arg)))
+
       (primapp-bi-exp (rand1 prim rand2)
           (let((arg1 (eval-primapp-exp-rand rand1 env))
                (arg2 (eval-primapp-exp-rand rand2 env)))
                (apply-bi-primitive arg1 prim arg2)))
+
       (boolean-expr (datum) (eval-bool-exp datum env))
+
       (lista (list-elements)
              (list->vector (map (lambda (element) (eval-expression element env) ) list-elements)))
+
       (prim-list-exp (datum) (eval-prim-list datum env))
+
       (tupla (elements)
              (map (lambda (element) (eval-expression element env) ) elements))
+
       (prim-tuple-exp(a) (eval-prim-tuple a env))
+
       (base-exp (base valores)
                 (eval-base-exp (eval-expression base env) (map (lambda (element) (eval-expression element env) ) valores)  env))
 
 
       (registro (first-id first-value rest-id rest-value) (list (cons first-id rest-id)
                                                                 (list->vector (map (lambda (element) (eval-expression element env) ) (cons first-value rest-value)))))
+
+      (print-exp (exp) (begin (display (eval-expression exp env)) (display "\n") 'endPrint))
+
+
+       (begin-exp (exp lexps)
+                 (if (null? lexps)
+                     (eval-expression exp env)
+                     (letrec
+                         [(recorrer (lambda (L)
+                                      (cond
+                                        [(null? (cdr L)) (eval-expression (car L) env)]
+                                        [else (begin (eval-expression (car L) env)
+                                                     (recorrer (cdr L))
+                                        )]
+                                        )
+                                      ))
+                          ]
+                       (begin
+                         (eval-expression exp env)
+                         (recorrer lexps))
+                         )
+                     )
+                 )
+
       (prim-registro-exp (regs-prim) (eval-regs-prim regs-prim env))
+
       (if-exp (test-exp true-exp false-exp)
           (if (valor-verdad? (eval-expression test-exp env))
             (eval-expression true-exp env)
             (eval-expression false-exp env)))
 
-      (for-exp (variable inicio final cuerpo )
-               (let
-                   ((de (eval-expression inicio env))
-                    (to (eval-expression final env)))
-                 (let loop ((i de))
-                   (when (< i to)
-                     (display (eval-expression cuerpo (extend-env (list variable) (list i) env)) )
-                     (display "\n")
-                     (loop (+ 1 i)) ))))
+
+      (for-exp (id exp1 tod exp2 body)
+               (letrec
+                   [(i (eval-expression exp1 env))
+                    (parada (eval-expression exp2 env))
+                    (op (cases to-o-downto tod
+                          (to () +)
+                          (downto () -)
+                          ))
+                    (proc-for (cerradura (list id) body env))
+                    (for (lambda (var)
+                           (if (eqv? var parada)
+                               (apply-procedure proc-for (list (direct-target var)))
+                               (begin (apply-procedure proc-for (list (direct-target var))) (for (op var 1)))
+                               )
+                               )
+                           )]
+                 (for i)
+                   )
+               )
 
       (while-exp (bool-exp body) (eval-while-exp bool-exp body env))
-      (proc-exp (ids cuerpo)
-          (cerradura ids cuerpo env))
+
+      (proc-exp (ids cuerpo)(cerradura ids cuerpo env))
+
       (app-exp (rator rands)
                (let((proc (eval-expression rator env))
                     (args (eval-rands rands env)))
@@ -331,9 +446,11 @@
                     (apply-procedure proc args)
                     (eopl:error 'eval-expression
                                 "Attemp to apply non-procedure ~s" proc))))
+
       (variableLocal-exp (ids values body)
                          (let ((args (eval-variableLocal-exp-rands values env)))
                  (eval-expression body (extend-env ids args env))))
+
       (constanteLocal-exp (ids values body)
                          (let ((args (eval-variableLocal-exp-rands values env)))
                            (if (searchUpdateValExp body)
@@ -387,7 +504,9 @@
       (else 1))))
 
 
+
 ;;funcion auxiliar que evalua expresiones booleanas
+
 (define eval-bool-exp
   (lambda (expr-boolean env)
     (cases expr-bool expr-boolean
@@ -521,6 +640,7 @@
 (define eval-regs-prim
   (lambda (regs-primitive env)
     (cases regs-prim regs-primitive
+
       (prim-regs?-registro (exp) (let ((regs (eval-expression exp env)))
                              (if (and (list? regs) (= (length regs) 2))
                                  (if (and (vector? (cadr regs))
@@ -595,6 +715,9 @@
       (primitiva-multi () (if (and (list? arg1) (list? arg2))(operacion-base * (car(cdr arg1)) (car(cdr arg2)) (car arg1))(* arg1 arg2 )))
       (primitiva-div () (if (and (list? arg1) (list? arg2)) ((eopl:error 'deref
                                                       "No se puede realizar esta operacion con bases" ))(/ arg1 arg2 )))
+
+      (primitiva-elmodulo () (if (and (list? arg1) (list? arg2)) ((eopl:error 'deref
+                                                      "No se puede realizar esta operacion con bases" ))(modulo arg1 arg2 )))
       (primitiva-concat () (string-append arg1 arg2))
 
     )))
@@ -619,7 +742,7 @@
         #f)))
 
 ;*******************************************************************************************
-;Procedimientos
+;Procedimientos ; clousure
 ;definir un datatype para la cerradura
 
 (define-datatype procVal procVal?
@@ -705,6 +828,8 @@
       (while-exp (bool-exp body) #f)
       (texto-lit (datum) #f)
       (var-exp (id) #f)
+      (print-exp (exp) #f)
+      (begin-exp (exp lexps) #f)
       (base-exp(base valores)#f)
       (primapp-un-exp (prim rand)
           #f)
@@ -721,7 +846,7 @@
       (prim-registro-exp (regs-prim) #f)
       (if-exp (test-exp true-exp false-exp)
           #f)
-      (for-exp (a b c d) #f)
+      (for-exp (id exp1 tod exp2 body) #f)
       (proc-exp (ids cuerpo)
           (searchUpdateValExp cuerpo))
       (app-exp (rator rands)
@@ -1041,32 +1166,104 @@
                 #f))))))
 
 
-;******************************************************************************************
-;;pruebas
+;*******************************PRUEBAS***********************************************************
 
-;;___________________________________________
+;Expression- id-exp
+(scan&parse "x")
+
+;Expression- false-exp
+(scan&parse "false")
+
+;Expression- true-exp
+(scan&parse "true")
+
+;Expression- primapp-exp
+
+;Primitiva Print
+(scan&parse "print(x)")
+
+;Números
+(scan&parse "-8")
+(scan&parse "3.5")
+(scan&parse "-0.5")
+
+;Primitivas sobre números
+(scan&parse "(1 + 1)") ;suma
+(scan&parse "(1~1)")   ;resta
+(scan&parse "(8/2)")   ;division
+(scan&parse "(4*4)")   ;producto
+(scan&parse "(6 mod 4)")
+(scan&parse "add1(9)")
+(scan&parse "sub1(10)")
+
+;;_____________________________________________________________________________
+;Numeros en base 32, hexadecimales, octales
+;16 en hexadecimal es (0 1) porque ((0*16^0)+(1*16^1))= 16
+
+;(16 (0 1)) = 16
+;(16 (0 1)) = 16
+;            -----
+;             32
+; 32 = (16 (0 2)) porque ((0*16^0)+(2*16^1))= 32
+(scan&parse "(base 16 (0 1) + base 16 (0 1))")
+(scan&parse "(base 16 (1 2) + base 16 (1 2))")
+(scan&parse "(base 16 (1 5) + base 16 (1 5))")
+(scan&parse "(base 8 (1 2) ~ base 8 (1 2)) ")
+(scan&parse "(base 32 (1 2) * base 32 (1)) ")
+(scan&parse "((base 16 (1 2) + base 16 (1 2)) + base 16 (1 2))")
+
+;(16 (5 6 3))
+(scan&parse "(base 16 (4 5 3) + base 16 (1 1))")
+
+; (16 (1 2))
+(scan&parse "add1( base 16 (32))")
+
+;(16 (5 5 3))
+(scan&parse "add1( base 16(4 5 3))")
+(scan&parse "add1( base 16 (15))")
+(scan&parse "sub1( base 16 (1))" )
+(scan&parse "add1( base 16 (1))" )
+
+;;_____________________________________________________________________________
+;;print(x)
+;;para prueba en el interprete se usa begin print("hola") ; print("mundo") end
+(scan&parse "begin print(\"hola\") ; print(\"mundo\") end")
+
+;String
+;;para prueba en el interprete se usa longitud("hola")
+(scan&parse "longitud(\"hola\")") ;4
+(scan&parse "longitud(\"longevo\")") ;7
+(scan&parse "(\"hola\" concat \"mundo\")") ;"holamundo"
+(scan&parse "(\"6\" concat \"4\")") ;"64"
+
+;;_____________________________________________________________________________
+;;for
+(scan&parse "for x = 1 to 5 do print(x) done")
+(scan&parse "for x = 5 downto 1 do print(x) done")
+
+;;_____________________________________________________________________________
 ;; expr-bool
 (scan&parse "true")
 (scan&parse "<(8,9)")
 (scan&parse "or (<(1,0),>=(10,10))")
-;;___________________________________________
+;;_____________________________________________________________________________
 ;; lista
 (scan&parse "[1;or (<(1,0),>=(10,10))]")
 (scan&parse "vacio?-lista([1;or (<(1,0),>=(10,10))])")
 (scan&parse "set-lista([1;or (<(1,0),>=(10,10))],1,9)")
-;;___________________________________________
+;;_____________________________________________________________________________
 ;; tuplas
 (scan&parse "ref-tupla(crear-tupla(1, 2, 4,and (<(10,5),>(1,90))),3)")
 (scan&parse "vacio?-tupla(tupla(1;or (<(1,0),>=(10,10))))")
 (scan&parse "tupla?(vacio-tupla())")
 (scan&parse "cabeza-tupla( cola-tupla(tupla(1;2;3;4;5)))")
-;;___________________________________________
+;;_____________________________________________________________________________
 ;; registros
 (scan&parse "crear-registro(f=5,t=4,ff=90)")
 (scan&parse "{f=5;t=4;ff=90}")
 (scan&parse "registros?({f=5;t=4;ff=90})")
 (scan&parse "ref-registro({f=5;t=4;ff=90}, ff)")
-;;___________________________________________
+;;_____________________________________________________________________________
 ;; variables y constantes
 (scan&parse "variables
 (y=3){bloque{y; actualizar y = 3; y}}")
@@ -1075,15 +1272,7 @@
 }}")
 ;; --> error: no se pueden actualizar las constantes
 ;;___________________________________________
-;; numeros en base 32, hexadecimales, octales
-; 16 en hexadecimal es (0 1) porque ((0*16^0)+(1*16^1))= 16
 
-(scan&parse " (base 16 (1 2) + base 16 (1 2))")
-(scan&parse " (base 8 (1 2) ~ base 8 (1 2)) ")
-(scan&parse " (base 32 (1 2) * base 32 (1)) ")
-(scan&parse " ((base 16 (1 2) + base 16 (1 2)) + base 16 (1 2))")
-(scan&parse " add1( base 16 (15))")
-(scan&parse "sub1( base 16 (1))" )
 
 ;;___________________________________________
 ;; procedimientos (recursivos y no recursivos)
@@ -1092,8 +1281,7 @@
 (scan&parse "letrec fact(n) = if ==(n,0) then 1 else (n * invocar( fact( (n~1) ) ) ) endif {invocar(fact(5))}")
 ;; --> 120
 ;;___________________________________________
-;; for
-(scan&parse "for i in range ( 1 , 4) do 2 endfor" )
+(interpretador)
 
 ;;_____________________________________________
 ;; clases
@@ -1159,4 +1347,3 @@ clase sedan hereda carro
   metodo caracteristicas(){tupla(self.numPuertas;self.numRuedas)}
   metodo derrapar(chofer){super conducir(chofer)}
 new sedan(2, 4)")
-(interpretador)
