@@ -1,6 +1,5 @@
 #lang eopl
 
-;******************************************************************************************
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos y recursion
 
 ;; La definición BNF para las expresiones del lenguaje:
@@ -25,6 +24,8 @@
 ;;                      <primapp-exp (prim rands)>
 ;;                  ::= if <expression> then <expression> else <expression> endif
 ;;                      <if-exp (test-exp true-exp false-exp)>
+;;                  ::= for <identificador> in range ( <number>, <number>) do {<expresion>} endfor
+;;                     <for-exp variable inicio final cuerpo>
 ;;                  ::= while <expresion-bool> do { <expresion>}done
 ;;                     <while-exp expBoolWhile expWhile>
 ;;                  ::= proc({<identificador>}*(,)) { <expression> }
@@ -138,6 +139,8 @@
     (expression ("{"identifier "=" expression (arbno ";" identifier "=" expression) "}") registro)
     (expression (regs-prim) prim-registro-exp)
     (expression ("if" expression "then" expression "else" expression "endif") if-exp)
+    ;for
+    (expression ("for" identifier "in range" "(" expression "," expression ") do" expression "endfor") for-exp)
     ;while
     (expression ("while" "("expression")" "do" expression"end" ) while-exp)
     (expression ("variables" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") variableLocal-exp)
@@ -293,6 +296,17 @@
           (if (valor-verdad? (eval-expression test-exp env))
             (eval-expression true-exp env)
             (eval-expression false-exp env)))
+
+      (for-exp (variable inicio final cuerpo )
+               (let
+                   ((de (eval-expression inicio env))
+                    (to (eval-expression final env)))
+                 (let loop ((i de))
+                   (when (< i to)
+                     (display (eval-expression cuerpo (extend-env (list variable) (list i) env)) )
+                     (display "\n")
+                     (loop (+ 1 i)) ))))
+
       (while-exp (bool-exp body) (eval-while-exp bool-exp body env))
       (proc-exp (ids cuerpo)
           (cerradura ids cuerpo env))
@@ -685,6 +699,7 @@
       (prim-registro-exp (regs-prim) #f)
       (if-exp (test-exp true-exp false-exp)
           #f)
+      (for-exp (a b c d) #f)
       (proc-exp (ids cuerpo)
           (searchUpdateValExp cuerpo))
       (app-exp (rator rands)
@@ -1046,6 +1061,9 @@
 ;; --> 13
 (scan&parse "letrec fact(n) = if ==(n,0) then 1 else (n * invocar( fact( (n~1) ) ) ) endif {invocar(fact(5))}")
 ;; --> 120
+;;___________________________________________
+;; for
+(scan&parse "for i in range ( 1 , 4) do 2 endfor" )
 
 ;;_____________________________________________
 ;; clases
