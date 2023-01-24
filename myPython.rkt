@@ -453,10 +453,13 @@
 
       (constanteLocal-exp (ids values body)
                          (let ((args (eval-variableLocal-exp-rands values env)))
+
                            (if (searchUpdateValExp body)
                                (eopl:error 'eval-expression
                                 "No puedes actualizar los valores de constantes ~s" body)
                                (eval-expression body (extend-env ids args env)))
+
+
 
                            ))
 
@@ -700,7 +703,10 @@
 
 (define eval-variableLocal-exp-rand
   (lambda (rand env)
-    (direct-target (eval-expression rand env))))
+    (direct-target (eval-expression rand env))
+
+
+    ))
 
 ;apply-bi-primitive: <expression> <primitiva-binaria> <expression> -> numero|cadena
 (define apply-bi-primitive
@@ -765,7 +771,7 @@
 ;;Auxiliares para checkear los tipos de datos referencia y blanco
 (define expval?
   (lambda (x)
-    (or (number? x) (procVal? x) (string? x))))
+    (or (number? x) (procVal? x) (string? x) (vector? x) (boolean? x) (list? x))))
 
 (define ref-to-direct-target?
   (lambda (x)
@@ -1347,3 +1353,13 @@ clase sedan hereda carro
   metodo caracteristicas(){tupla(self.numPuertas;self.numRuedas)}
   metodo derrapar(chofer){super conducir(chofer)}
 new sedan(2, 4)")
+
+;; usos
+(scan&parse "variables(a = crear-lista()){
+                bloque{
+                   for x = 1 to 5 do
+                       actualizar a = append-lista(a,[(x * x)])
+                       done;
+                   a}
+                }")
+(scan&parse "constantes(a= 1.1; b= crear-registro(p=5,r=2)){ref-registro(b,r)}")
