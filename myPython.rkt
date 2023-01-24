@@ -8,9 +8,12 @@
 ;;                      <un-programa (exp)>
 ;;  <expression>    ::= <number>
 ;;                      <lit-exp (datum)>
-
 ;;                  ::= <expr-bool>
 ;;                      <boolean-expr (datum)>
+;;                  ::= [{< expression>}* (;)]
+;;                      <lista (list-elements)>
+;;                  ::= <list-prim>
+;;                      <prim-list-exp (datum)>
 ;;                  ::= <identifier>
 ;;                      <var-exp (id)>
 ;;                  ::= <primitive> ({<expression>}*(,))
@@ -25,14 +28,32 @@
 ;;                      <app-exp proc rands>
 ;;                  ::= letrec  {identifier ({identifier}*(,)) = <expression>}* in <expression>
 ;;                      <letrec-exp proc-names idss bodies bodyletrec>
-;;  <expr-bool>     ::= pred-prim ( expression , expression )
-;;                      <comp-num (pred-prim rand1 rand2)>
+;; <expr-bool>      ::= pred-prim ( expression , expression )
+;;                      <comp-pred (pred-prim rand1 rand2)>
 ;;                  ::= oper-bin-bool ( expr-bool , expr-bool )
 ;;                      <comp-bool-bin (oper-bin-bool rand1 rand2)>
-;;                  ::= bool
+;;                  ::= <bool>
 ;;                      <booleano-lit (datum)>
 ;;                  ::= oper-un-bool ( expr-bool)
 ;;                      <comp-bool-un (oper-un-bool rand)>
+;; <list-prim>      ::= vacio-lista()
+;;                      <prim-make-empty-list>
+;;                  ::= vacio?-lista(<expression>)
+;;                      <prim-empty-list (list)>
+;;                  ::= crear-lista({<expression>}* (,))
+;;                      <prim-make-list (list-elem)>
+;;                  ::= lista?(<expression>)
+;;                      <prim-list?-list (exp)>
+;;                  ::= cabeza-lista(<expression>)
+;;                      <prim-head-list (exp)>
+;;                  ::= cola-lista(<expression>)
+;;                      <prim-tail-list (exp)>
+;;                  ::= append-lista(<expression>,<expression>)
+;;                      <prim-append-list (exp1 exp2)>
+;;                  ::= ref-lista(<expression>,<expression>)
+;;                      <prim-ref-list (list pos)>
+;;                  ::= set-lista(<expression>,<expression>,<expression>)
+;;                      <prim-ref-list (list pos value)>
 ;; <pred-prim>      ::= < | > | <= | >= | == | <>
 ;; <oper-bin-bool>  ::= and|or
 ;; <oper-un-bool>   ::= not
@@ -76,13 +97,17 @@
     (expression (uni-primitive "(" expression ")") primapp-un-exp)
     (expression ("(" expression bi-primitive expression ")") primapp-bi-exp)
     (expression (expr-bool) boolean-expr)
+    (expression ("["(separated-list expression ";") "]") lista)
+    (expression (list-prim) prim-list-exp)
+    (expression ("{"(separated-list expression ";") "}") lista)
+    (expression (list-prim) prim-list-exp)
     (expression ("Si" expression "entonces" expression "sino" expression "finSI") condicional-exp)
     (expression ("procedimiento" "(" (separated-list identifier ",") ")" "haga" expression "finProc") procedimiento-ex)
     (expression ("declarar" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") variableLocal-exp)
     (expression ("evaluar" expression "(" (separated-list expression ",") ")" "finEval") app-exp)
     (expression ("letrec" (arbno identifier "(" (separated-list identifier ",") ")" "=" expression)  "in" expression) letrec-exp)
     ;;;;;;
-    (expr-bool (pred-prim "(" expression "," expression ")") comp-num)
+    (expr-bool (pred-prim "(" expression "," expression ")") comp-pred)
     (expr-bool (oper-bin-bool "(" expr-bool "," expr-bool ")") comp-bool-bin)
     (expr-bool (bool) booleano-lit)
     (expr-bool (oper-un-bool "(" expr-bool ")") comp-bool-un)
@@ -92,19 +117,30 @@
     (bi-primitive ("*") primitiva-multi)
     (bi-primitive ("/") primitiva-div)
     (bi-primitive ("concat") primitiva-concat)
-    ;;;;;;
     (uni-primitive ("add1") primitiva-add1)
     (uni-primitive ("sub1") primitiva-sub1)
     (uni-primitive ("longitud") primitiva-longitud)
+    ;;;;;;
     (pred-prim ("<") prim-bool-menor)
     (pred-prim (">") prim-bool-mayor)
     (pred-prim ("<=") prim-bool-menor-igual)
     (pred-prim (">=") prim-bool-mayor-igual)
     (pred-prim ("==") prim-bool-equiv)
     (pred-prim ("<>") prim-bool-diff)
+    ;;;;;;
     (oper-bin-bool ("and") prim-bool-conj)
     (oper-bin-bool ("or") prim-bool-disy)
     (oper-un-bool ("not") prim-bool-neg)
+    ;;;;;;
+    (list-prim ("vacio-lista" "("")") prim-make-empty-list)
+    (list-prim ("vacio?-lista" "("expression")") prim-empty-list)
+    (list-prim ("crear-lista" "("(separated-list expression ",") ")") prim-make-list); crear-lista(<elem1>,<elem2>,<elem3>,...)
+    (list-prim ("lista?" "("expression")") prim-list?-list); lista?(<lista>)-> Bool
+    (list-prim ("cabeza-lista""(" expression")") prim-head-list);cabeza-lista(<lista>)-> <elem1>
+    (list-prim ("cola-lista" "(" expression")") prim-tail-list);cola-lista(<lista>)-> <elem2>,<elem3>,...
+    (list-prim ("append-lista""("expression "," expression")") prim-append-list);append-lista([<elem1>,<elem2>,<elem3>,...],[<elemA>,<elemB>,<elemC>,...])-> <elem1>,<elem2>,<elem3>,...,<elemA>,<elemB>,<elemC>,...
+    (list-prim ("ref-lista""("expression "," expression")") prim-ref-list);ref-lista(<lista>, pos)
+    (list-prim ("set-lista""("expression "," expression "," expression ")") prim-set-list);set-lista(<lista>, pos, value)
   )
 )
 ;*******************************************************************************************
@@ -167,8 +203,11 @@
           (let((arg1 (eval-rator rator env))
                (arg2 (eval-rand rand env)))
                (apply-bi-primitive arg1 prim arg2)))
-
       (boolean-expr (datum) (eval-bool-exp datum env))
+      (lista (list-elements)
+             (list->vector (map (lambda (element) (eval-expression element env) ) list-elements)))
+
+      (prim-list-exp (datum) (eval-prim-list datum env))
       (condicional-exp (test-exp true-exp false-exp)
           (if (valor-verdad? (eval-expression test-exp env))
             (eval-expression true-exp env)
@@ -195,15 +234,15 @@
 (define eval-bool-exp
   (lambda (expr-boolean env)
     (cases expr-bool expr-boolean
-      (comp-num (pred-prim rand1 rand2)
+      (comp-pred (pred-prim rand1 rand2)
                 (let ((arg1 (eval-expression rand1 env))
                       (arg2 (eval-expression rand2 env)))
-                  (eval-comp-num pred-prim arg1 arg2)))
+                  (eval-comp-pred pred-prim arg1 arg2)))
       (comp-bool-bin (oper-bin-bool rand1 rand2)
                      (let ((arg1 (eval-bool-exp rand1 env))
                            (arg2 (eval-bool-exp rand2 env)))
                           (eval-comp-bool-bin oper-bin-bool arg1 arg2)))
-      (booleano-lit (datum) datum)
+      (booleano-lit (datum) (if (equal? datum 'true) #t #f))
       (comp-bool-un (oper-unario-bool rand)
                     (let ((arg1 (eval-bool-exp rand env)))
                           (cases oper-un-bool oper-unario-bool
@@ -212,7 +251,7 @@
 
 
 ;;funcion auxiliar recibe una <pred-prim>  y dos argumentos ya evaluados, les aplica el respectivo predicado.
-(define eval-comp-num
+(define eval-comp-pred
   (lambda (pred-primitive arg1 arg2)
     (cases pred-prim pred-primitive
       (prim-bool-menor () (< arg1 arg2))
@@ -222,13 +261,45 @@
       (prim-bool-equiv () (equal? arg1 arg2))
       (prim-bool-diff () (not (equal? arg1 arg2))))))
 
-;;funcion auxiliar recibe un <oper-bin-bool >  y dos argumentos ya evaluados, les aplica el respectivo predicado.
+;;funcion auxiliar, recibe un <oper-bin-bool >  y dos argumentos ya evaluados, les aplica el respectivo predicado.
 (define eval-comp-bool-bin
   (lambda (oper-binario arg1 arg2)
     (cases oper-bin-bool oper-binario
       (prim-bool-conj () (and arg1 arg2))
       (prim-bool-disy () (or arg1 arg2))
       )))
+
+
+
+;;funcion auxiliar, evalua las primitivas sobre listas
+(define eval-prim-list
+  (lambda (primitiva env)
+    (cases list-prim primitiva
+      (prim-make-empty-list () (make-vector 0))
+      (prim-empty-list (exp) (= (vector-length (eval-expression exp env)) 0))
+      (prim-make-list (list-elem) (list->vector(map (lambda (elem) (eval-expression elem env)) list-elem)))
+      (prim-list?-list (exp) (vector? (eval-expression exp env)))
+      (prim-head-list (exp) (if (= (vector-length (eval-expression exp env)) 0)
+                                (eopl:error 'eval-expression
+                                 "cannot get the head of an empty list" )
+                                (vector-ref (eval-expression exp env) 0)))
+      (prim-tail-list (exp) (if (= (vector-length (eval-expression exp env)) 0)
+                                (make-vector 0)
+                                (list->vector(cdr (vector->list (eval-expression exp env))))))
+      (prim-append-list (exp1 exp2) (list->vector(append (vector->list (eval-expression exp1 env)) (vector->list (eval-expression exp2 env)))))
+      (prim-ref-list (list pos) (if (>= (eval-expression pos env) (vector-length (eval-expression list env)))
+                                (eopl:error 'eval-expression
+                                 "index ~s out of range [0:~s)"  (eval-expression pos env) (vector-length (eval-expression list env)))
+                                (vector-ref (eval-expression list env) (eval-expression pos env))))
+      (prim-set-list (list pos value) (if (>= (eval-expression pos env) (vector-length (eval-expression list env)))
+                                (eopl:error 'eval-expression
+                                 "index ~s out of range [0:~s)"  (eval-expression pos env) (vector-length (eval-expression list env)))
+                                 (vector-set! (eval-expression list env) (eval-expression pos env) (eval-expression value env))))
+
+      (else 1)
+    )))
+
+
 ; funciones auxiliares para aplicar eval-expression a cada elemento de una
 ; lista de operandos (expresiones)
 (define eval-rators
@@ -371,3 +442,8 @@
 (scan&parse "true")
 (scan&parse "<(8,9)")
 (scan&parse "or (<(1,0),>=(10,10))")
+;;___________________________________________
+;; lista
+(scan&parse "[1;or (<(1,0),>=(10,10))]")
+(scan&parse "vacio?-lista([1;or (<(1,0),>=(10,10))])")
+(scan&parse "set-lista([1;or (<(1,0),>=(10,10))],1,9)")
