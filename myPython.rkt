@@ -4,8 +4,15 @@
 
 ;; La definición BNF para las expresiones del lenguaje:
 ;;
-;;  <program>       ::= <expression>
-;;                      <un-programa (exp)>
+;;  <program>        ::= <expression>
+;;                       <un-programa (exp)>
+
+;; <class-decl>     ::= class <identificador> extends <identificador> {field <identificador>}* {<method-decl>}*
+;;                      <a-class-decl(class-name super-name fields-ids method-decls)>
+
+;; <method-decl>    ::= method <identificador> ( {<identificador>}*(,) ) <expresion>
+;;                      <a-method-decl (method-name ids body)>
+
 ;;  <expression>    ::= <number>
 ;;                      <lit-exp (datum)>
 ;;                  ::= <expr-bool>
@@ -34,8 +41,14 @@
 ;;                      <letrec-exp proc-names idss bodies letrec-body>
 ;;                  ::= invocar(<expression> (<expression>)*(,))
 ;;                      <app-exp proc rands>
+
+;;                  ::= new <identificador> ({<expresion}*(,))
+;;                     <new-object-exp (class-name rands)>
+;;                  ::= send <expresion> <identificador> ({<expresion>}*(,))
+;;                     <method-app-exp (obj-exp method-name rands)>
 ;;                  ::= super identifier({identifier>}*(,))
 ;;                      <super-call-exp method-name rands>
+
 ;;                  ::= base <num> ({number}* )
 ;;                      <base-exp>
 
@@ -209,6 +222,7 @@
     (method-decl ("metodo" identifier "(" (separated-list identifier ",") ")" "{" expression "}")a-method-decl)
     (expression ("new" identifier "(" (separated-list expression ",") ")") new-object-exp)
     (expression ("super" identifier "(" (separated-list identifier ",") ")") super-call-exp)
+    (expression ("send" expression identifier "("  (separated-list expression ",") ")") method-app-exp)
     (expression ("mostrar") mostrar-exp)
 
   )
@@ -348,12 +362,20 @@
                   (eval-expression letrec-body
                                    (extend-env-recursively proc-names idss bodies env)))
 
+      ;; Objetos
       (new-object-exp (class-name rands)
         (let ((args (eval-rands rands env))
               (obj (new-object class-name)))
           (find-method-and-apply 'init class-name obj args)
           obj
           ))
+
+      ;; para las expresiones de invocación de métodos (send)
+      (method-app-exp (obj-exp method-name rands)
+        (let ((args (eval-rands rands env))
+              (obj (eval-expression obj-exp env)))
+          (find-method-and-apply
+            method-name (object->class-name obj) obj args)))
 
       (super-call-exp (method-name rands)
         (let ((args (eval-rands rands env))
@@ -732,6 +754,7 @@
                   (searchUpdateValExp letrec-body))
       (new-object-exp (id args) #f)
       (mostrar-exp () #f)
+      (method-app-exp (obj-exp method-name rands) #f)
       (super-call-exp (method-name rands) #f)
     )
   )
@@ -851,50 +874,7 @@
   (lambda (mds)
     (map method-decl->method-name mds)))
 
-;; Métodos
-
-(define find-method-and-apply
-  (lambda (m-name host-name self args)
-    (if (eqv? host-name 'objeto)
-      (if (eqv? m-name 'init)
-          (eopl:error 'find-method-and-apply
-        "~s method was not provided" m-name)
-          (eopl:error 'find-method-and-apply
-        "No method for name ~s" m-name))
-      (let ((m-decl (lookup-method-decl m-name
-                      (class-name->method-decls host-name))))
-        (if (method-decl? m-decl)
-           (apply-method m-decl host-name self args)
-          (find-method-and-apply m-name
-            (class-name->super-name host-name)
-            self args))))))
-
-(define view-object-as
-  (lambda (parts class-name)
-    (if (eqv? (part->class-name (car parts)) class-name)
-      parts
-      (view-object-as (cdr parts) class-name))))
-
-(define apply-method
-  (lambda (m-decl host-name self args)
-    (let ((ids (method-decl->ids m-decl))
-          (body (method-decl->body m-decl))
-          (super-name (class-name->super-name host-name)))
-      (eval-expression body
-        (extend-env
-          (cons '%super (cons 'self ids))
-          (cons super-name (cons self args))
-          (build-field-env
-            (view-object-as self host-name)))))))
-(define build-field-env
-  (lambda (parts)
-    (if (null? parts)
-      (empty-env)
-      (extend-env-refs
-        (part->field-ids (car parts))
-        (part->fields    (car parts))
-        (build-field-env (cdr parts))))))
-;; Selectores
+;;;;;;;;;;;;;;;;;; Selectores ;;;;;;;;;;;;;;;;;;
 
 (define part->class-name
   (lambda (prt)
@@ -936,18 +916,6 @@
   (lambda (parts)
     (part->class-name (car parts))))
 
-;iota: number -> list
-;función que retorna una lista de los números desde 0 hasta end
-(define iota
-  (lambda (end)
-    (let loop ((next 0))
-      (if (>= next end) '()
-        (cons next (loop (+ 1 next)))))))
-
-(define extend-env-refs
-  (lambda (syms vec env)
-    (extended-env-record syms vec env)))
-
 (define-datatype part part?
   (a-part
     (class-name symbol?)
@@ -966,7 +934,69 @@
   (lambda (c-decl)
     (a-part
       (class-decl->class-name c-decl)
-      (make-vector (length (class-decl->field-ids c-decl)) (direct-target 0)))))
+      (make-vector (length (class-decl->field-ids c-decl))(direct-target 0)))))
+
+
+;;;;;;;;;;;;;;;;;;;; Métodos ;;;;;;;;;;;;;;;;;;
+
+(define find-method-and-apply
+  (lambda (m-name host-name self args)
+    (if (eqv? host-name 'objeto)
+      (if (eqv? m-name 'init)
+          (eopl:error 'find-method-and-apply
+        "~s method was not provided" m-name)
+          (eopl:error 'find-method-and-apply
+        "No method for name ~s" m-name))
+      (let ((m-decl (lookup-method-decl m-name
+                      (class-name->method-decls host-name))))
+        (if (method-decl? m-decl)
+           (apply-method m-decl host-name self args)
+          (find-method-and-apply m-name
+            (class-name->super-name host-name)
+            self args))))))
+
+(define view-object-as
+  (lambda (parts class-name)
+    (if (eqv? (part->class-name (car parts)) class-name)
+      parts
+      (view-object-as (cdr parts) class-name))))
+
+(define apply-method
+  (lambda (m-decl host-name self args)
+    (let ((ids (method-decl->ids m-decl))
+          (body (method-decl->body m-decl))
+          (super-name (class-name->super-name host-name)))
+      (eval-expression body
+        (extend-env
+          (cons '%super (cons 'self ids))
+          (cons super-name (cons self args))
+          (build-field-env
+            (view-object-as self host-name)))))))
+
+(define build-field-env
+  (lambda (parts)
+    (if (null? parts)
+      (empty-env)
+      (extend-env-refs
+        (part->field-ids (car parts))
+        (part->fields    (car parts))
+        (build-field-env (cdr parts))))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;iota: number -> list
+;función que retorna una lista de los números desde 0 hasta end
+(define iota
+  (lambda (end)
+    (let loop ((next 0))
+      (if (>= next end) '()
+        (cons next (loop (+ 1 next)))))))
+
+(define extend-env-refs
+  (lambda (syms vec env)
+    (extended-env-record syms vec env)))
+
+
 
 ;________________________________________________________________________________________________________________________
 ;función que busca un símbolo en un ambiente
@@ -1129,3 +1159,4 @@ clase sedan hereda carro
   metodo caracteristicas(){tupla(self.numPuertas;self.numRuedas)}
   metodo derrapar(chofer){super conducir(chofer)}
 new sedan(2, 4)")
+(interpretador)
