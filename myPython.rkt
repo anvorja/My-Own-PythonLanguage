@@ -1,4 +1,5 @@
 #lang eopl
+;******************************************************************************************
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos y recursion
 
 ;; La definición BNF para las expresiones del lenguaje:
@@ -23,6 +24,8 @@
 ;;                      <primapp-exp (prim rands)>
 ;;                  ::= if <expression> then <expression> else <expression> endif
 ;;                      <if-exp (test-exp true-exp false-exp)>
+;;                  ::= while <expresion-bool> do { <expresion>}done
+;;                     <while-exp expBoolWhile expWhile>
 ;;                  ::= proc({<identificador>}*(,)) { <expression> }
 ;;                      <proc-exp (ids body)>
 ;;                  ::= letrec  {identifier ({identifier}*(,)) = <expression>}* { <expression> }
@@ -31,6 +34,9 @@
 ;;                      <app-exp proc rands>
 ;;                  ::= super identifier({identifier>}*(,))
 ;;                      <super-call-exp method-name rands>
+;;                  ::= base <num> ({number}* )
+;;                      <base-exp>
+
 ;; <expr-bool>      ::= pred-prim ( expression , expression )
 ;;                      <comp-pred (pred-prim rand1 rand2)>
 ;;                  ::= oper-bin-bool ( expr-bool , expr-bool )
@@ -97,9 +103,9 @@
   (comment
    ("%" (arbno (not #\newline))) skip)
   (identifier
-   (letter (arbno (or letter digit "?"))) symbol)
+   (letter (arbno (or letter digit "?" "."))) symbol)
   (bool
-   ((or "true" "false")) symbol)
+   ((or "@true" "@false")) symbol)
   (txt
    ("\"" (arbno (or letter digit whitespace "," "." ":" "-")) "\"") string)
   (number
@@ -131,12 +137,16 @@
     (expression ("{"identifier "=" expression (arbno ";" identifier "=" expression) "}") registro)
     (expression (regs-prim) prim-registro-exp)
     (expression ("if" expression "then" expression "else" expression "endif") if-exp)
+    ;while
+    (expression ("while" "("expression")" "do" expression"end" ) while-exp)
     (expression ("variables" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") variableLocal-exp)
     (expression ("constantes" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") constanteLocal-exp)
     (expression ("proc" "(" (separated-list identifier ",") ")" "{" expression "}") proc-exp)
     (expression ("letrec" (arbno identifier "(" (separated-list identifier ",") ")" "=" expression)  "{" expression "}") letrec-exp)
     (expression ("invocar" "(" expression "(" (separated-list expression ",") ")" ")") app-exp)
     (expression ("nuevo" identifier "(" (separated-list expression ",") ")") new-object-exp)
+    (expression ("base" expression "(" (arbno expression) ")") base-exp)
+
     ;;;;;;
     (expression ("actualizar" identifier "=" expression)
                 updateVar-exp)
@@ -193,6 +203,7 @@
     ;;;;;POO
     (class-decl ("clase" identifier "hereda" identifier (arbno "campo" identifier) (arbno method-decl)) a-class-decl)
     (method-decl ("metodo" identifier "(" (separated-list identifier ",") ")" "{" expression "}")a-method-decl)
+    (expression ("new" identifier "(" (separated-list expression ",") ")") new-object-exp)
     (expression ("super" identifier "(" (separated-list identifier ",") ")") super-call-exp)
     (expression ("mostrar") mostrar-exp)
 
@@ -270,6 +281,10 @@
       (tupla (elements)
              (map (lambda (element) (eval-expression element env) ) elements))
       (prim-tuple-exp(a) (eval-prim-tuple a env))
+      (base-exp (base valores)
+                (eval-base-exp (eval-expression base env) (map (lambda (element) (eval-expression element env) ) valores)  env))
+
+
       (registro (first-id first-value rest-id rest-value) (list (cons first-id rest-id)
                                                                 (list->vector (map (lambda (element) (eval-expression element env) ) (cons first-value rest-value)))))
       (prim-registro-exp (regs-prim) (eval-regs-prim regs-prim env))
@@ -277,6 +292,7 @@
           (if (valor-verdad? (eval-expression test-exp env))
             (eval-expression true-exp env)
             (eval-expression false-exp env)))
+      (while-exp (bool-exp body) (eval-while-exp bool-exp body env))
       (proc-exp (ids cuerpo)
           (cerradura ids cuerpo env))
       (app-exp (rator rands)
@@ -299,11 +315,9 @@
                            ))
 
       (updateVar-exp (id newVal)
-               (begin
-                 (setref!
+               (setref!
                   (apply-env-ref env id)
-                  (eval-expression newVal env))
-                 1))
+                  (eval-expression newVal env)))
 
       (block-exp (exp exps)
                  (let loop ((acc (eval-expression exp env))
@@ -319,7 +333,12 @@
                   (eval-expression letrec-body
                                    (extend-env-recursively proc-names idss bodies env)))
 
-      (new-object-exp (id args) #t)
+      (new-object-exp (class-name rands)
+        (let ((args (eval-rands rands env))
+              (obj (new-object class-name)))
+          (find-method-and-apply 'init class-name obj args)
+          obj
+          ))
 
       (super-call-exp (method-name rands)
         (let ((args (eval-rands rands env))
@@ -343,7 +362,7 @@
                      (let ((arg1 (eval-bool-exp rand1 env))
                            (arg2 (eval-bool-exp rand2 env)))
                           (eval-comp-bool-bin oper-bin-bool arg1 arg2)))
-      (booleano-lit (datum) (if (equal? datum 'true) #t #f))
+      (booleano-lit (datum) (if (equal? datum '@true) #t #f))
       (comp-bool-un (oper-unario-bool rand)
                     (let ((arg1 (eval-bool-exp rand env)))
                           (cases oper-un-bool oper-unario-bool
@@ -419,6 +438,47 @@
                                 (list-ref (eval-expression tuple env) (eval-expression pos env))))
     )))
 
+;; Números en diferentes bases:
+;; Una lista cuyo primer elemento representa la base en la que está escribo y su segundo elemento es la lista que lo representa
+
+(define eval-base-exp
+  (lambda (base valores env)
+      (list base valores)))
+
+;funciones auxiliar para pasar a base 10
+(define base10
+  (lambda (numeros exponente base)
+    (cond
+      ((null? numeros) 0)
+
+      (else
+       (+ (*(car numeros) (expt base exponente)) (base10 (cdr numeros) (+ exponente 1) base))))))
+
+;; pasar numeros a decimal
+(define to-decimal
+  (lambda (numeros base)
+    (base10 numeros 0 base)
+    ))
+;;sumar numeros en otras bases
+(define operacion-base
+  (lambda (operacion list-num1 list-num2 base)
+   (cons base (list (to-base (operacion(to-decimal list-num1 base) (to-decimal list-num2 base)) base )))))
+
+;; pasar numero a una base dada residuo(remainder 258 16) entero(quotient 258 16)
+(define to-base
+  (lambda (numero base)
+    (cond
+      ((=(quotient numero base)0) (list numero))
+      (else
+       (cons (remainder numero base) (to-base (quotient numero base) base))
+       )
+      )
+    ))
+
+;Implementación estructura while
+(define eval-while-exp
+        (lambda (bool-exp body env)
+          (if (valor-verdad? (eval-expression bool-exp env)) (begin (eval-expression body env) (eval-while-exp bool-exp body env)) 'fin )))
 
 ;;
 (define eval-regs-prim
@@ -489,19 +549,29 @@
 (define apply-bi-primitive
   (lambda (arg1 prim arg2)
     (cases bi-primitive prim
-      (primitiva-suma () (+ arg1 arg2))
-      (primitiva-resta () (- arg1 arg2))
-      (primitiva-multi () (* arg1 arg2))
-      (primitiva-div () (/ arg1 arg2))
+       (primitiva-suma ()(if (and (list? arg1) (list? arg2))
+                           (operacion-base + (car(cdr arg1)) (car(cdr arg2)) (car arg1))
+                           (+ arg1 arg2 )))
+      (primitiva-resta () (if (and (list? arg1) (list? arg2))
+                              (operacion-base - (car(cdr arg1)) (car(cdr arg2)) (car arg1))
+                              (- arg1 arg2 )))
+      (primitiva-multi () (if (and (list? arg1) (list? arg2))(operacion-base * (car(cdr arg1)) (car(cdr arg2)) (car arg1))(* arg1 arg2 )))
+      (primitiva-div () (if (and (list? arg1) (list? arg2)) ((eopl:error 'deref
+                                                      "No se puede realizar esta operacion con bases" ))(/ arg1 arg2 )))
       (primitiva-concat () (string-append arg1 arg2))
+
     )))
 
 ;apply-uni-primitive: <primitiva-unaria> <expression> -> numero
 (define apply-uni-primitive
   (lambda (prim args)
     (cases uni-primitive prim
-      (primitiva-add1 () (+ args 1))
-      (primitiva-sub1 () (- args 1))
+      (primitiva-add1 () (if (list? args)
+                           (operacion-base + (car(cdr args)) '(1) (car args))
+                           (+ args 1 )))
+      (primitiva-sub1 () (if (list? args)
+                           (operacion-base - (car(cdr args)) '(1) (car args))
+                           (- args 1 )))
       (primitiva-longitud (string-length args)))))
 
 ;valor-verdad?: determina si un valor dado corresponde a un valor booleano falso o verdadero.
@@ -578,8 +648,7 @@
 
 (define setref!
   (lambda (ref expval)
-    (let
-        ((ref (cases target (primitive-deref ref)
+    (let ((ref (cases target (primitive-deref ref)
                 (direct-target (expval1) ref)
                 (indirect-target (ref1) ref1))))
       (primitive-setref! ref (direct-target expval)))))
@@ -596,8 +665,10 @@
   (lambda (body)
     (cases expression body
       (numero-lit (datum) #f)
+      (while-exp (bool-exp body) #f)
       (texto-lit (datum) #f)
       (var-exp (id) #f)
+      (base-exp(base valores)#f)
       (primapp-un-exp (prim rand)
           #f)
       (primapp-bi-exp (rand1 prim rand2)
@@ -688,6 +759,8 @@
               (vector-set! vec pos (direct-target (cerradura ids body env))))
             (iota len) idss bodies)
           env)))))
+;_____________________________________________________________________________________________________________________________________________
+;;;;;;;;;;;;;;;;;;;;;;POO;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; Ambiente de declaracion de clases
 
@@ -735,7 +808,7 @@
   (lambda (c-decl)
     (cases class-decl c-decl
       (a-class-decl (class-name super-name field-ids m-decls)
-        field-ids))))
+        (map (lambda (id) (string->symbol (string-append "self." (symbol->string id)))) field-ids)))))
 
 (define class-decl->method-decls
   (lambda (c-decl)
@@ -767,21 +840,73 @@
 (define find-method-and-apply
   (lambda (m-name host-name self args)
     (if (eqv? host-name 'objeto)
-      (eopl:error 'find-method-and-apply
-        "No method for name ~s" m-name)
+      (if (eqv? m-name 'init)
+          (eopl:error 'find-method-and-apply
+        "~s method was not provided" m-name)
+          (eopl:error 'find-method-and-apply
+        "No method for name ~s" m-name))
       (let ((m-decl (lookup-method-decl m-name
                       (class-name->method-decls host-name))))
         (if (method-decl? m-decl)
-          (apply-method m-decl host-name self args)
+           (apply-method m-decl host-name self args)
           (find-method-and-apply m-name
             (class-name->super-name host-name)
             self args))))))
 
+(define view-object-as
+  (lambda (parts class-name)
+    (if (eqv? (part->class-name (car parts)) class-name)
+      parts
+      (view-object-as (cdr parts) class-name))))
+
 (define apply-method
   (lambda (m-decl host-name self args)
-    #t))
-
+    (let ((ids (method-decl->ids m-decl))
+          (body (method-decl->body m-decl))
+          (super-name (class-name->super-name host-name)))
+      (eval-expression body
+        (extend-env
+          (cons '%super (cons 'self ids))
+          (cons super-name (cons self args))
+          (build-field-env
+            (view-object-as self host-name)))))))
+(define build-field-env
+  (lambda (parts)
+    (if (null? parts)
+      (empty-env)
+      (extend-env-refs
+        (part->field-ids (car parts))
+        (part->fields    (car parts))
+        (build-field-env (cdr parts))))))
 ;; Selectores
+
+(define part->class-name
+  (lambda (prt)
+    (cases part prt
+      (a-part (class-name fields)
+        class-name))))
+
+(define part->fields
+  (lambda (prt)
+    (cases part prt
+      (a-part (class-name fields)
+        fields))))
+
+(define part->field-ids
+  (lambda (part)
+    (class-decl->field-ids (part->class-decl part))))
+
+(define part->class-decl
+  (lambda (part)
+    (lookup-class (part->class-name part))))
+
+(define part->method-decls
+  (lambda (part)
+    (class-decl->method-decls (part->class-decl part))))
+
+(define part->super-name
+  (lambda (part)
+    (class-decl->super-name (part->class-decl part))))
 
 (define class-name->method-decls
   (lambda (class-name)
@@ -790,6 +915,10 @@
 (define class-name->super-name
   (lambda (class-name)
     (class-decl->super-name (lookup-class class-name))))
+
+(define object->class-name
+  (lambda (parts)
+    (part->class-name (car parts))))
 
 ;iota: number -> list
 ;función que retorna una lista de los números desde 0 hasta end
@@ -808,6 +937,22 @@
     (class-name symbol?)
     (fields vector?)))
 
+(define new-object
+  (lambda (class-name)
+    (if (eqv? class-name 'objeto)
+      '()
+      (let ((c-decl (lookup-class class-name)))
+        (cons
+          (make-first-part c-decl)
+          (new-object (class-decl->super-name c-decl)))))))
+
+(define make-first-part
+  (lambda (c-decl)
+    (a-part
+      (class-decl->class-name c-decl)
+      (make-vector (length (class-decl->field-ids c-decl)) (direct-target 0)))))
+
+;________________________________________________________________________________________________________________________
 ;función que busca un símbolo en un ambiente
 (define apply-env
   (lambda (env sym)
@@ -816,10 +961,8 @@
 
 (define apply-env-ref
   (lambda (env sym)
-
     (cases environment env
-      (empty-env-record ()
-                        (eopl:error 'apply-env-ref "No se encontro en el ambiente a ~s" sym))
+      (empty-env-record () (eopl:error 'apply-env-ref "No se encontro en el ambiente a ~s" sym))
       (extended-env-record (syms vals env)
                            (let ((pos (rib-find-position sym syms)))
                              (if (number? pos)
@@ -885,6 +1028,16 @@
 (scan&parse "constantes(y=3){bloque{y; actualizar y = 3; y
 }}")
 ;; --> error: no se pueden actualizar las constantes
+;;___________________________________________
+;; numeros en base 32, hexadecimales, octales
+; 16 en hexadecimal es (0 1) porque ((0*16^0)+(1*16^1))= 16
+
+(scan&parse " (base 16 (1 2) + base 16 (1 2))")
+(scan&parse " (base 8 (1 2) ~ base 8 (1 2)) ")
+(scan&parse " (base 32 (1 2) * base 32 (1)) ")
+(scan&parse " ((base 16 (1 2) + base 16 (1 2)) + base 16 (1 2))")
+(scan&parse " add1( base 16 (15))")
+(scan&parse "sub1( base 16 (1))" )
 
 ;;___________________________________________
 ;; procedimientos (recursivos y no recursivos)
@@ -900,14 +1053,47 @@
 (scan&parse "clase carro hereda objeto
   campo numRuedas
   campo marca
+  metodo init (marca, numRuedas){variables(self.marca=marca; self.numRuedas=numRuedas){tupla(self.marca;self.numRuedas)}}
   metodo conducir(chofer) {chofer}
 clase sedan hereda carro
   campo numPuertas
   metodo derrapar(chofer){super conducir(chofer)}
 mostrar")
 ;; --> #(struct:a-program
-;;       (#(struct:a-class-decl carro objeto (numRuedas marca) (#(struct:a-method-decl conducir (chofer) #(struct:var-exp chofer))))
-;;        #(struct:a-class-decl sedan carro (numPuertas) (#(struct:a-method-decl derrapar (chofer) #(struct:super-call-exp conducir (chofer))))))
-;;       #(struct:mostrar-exp))
-
-(interpretador)
+;;  (#(struct:a-class-decl
+;;     carro
+;;     objeto
+;;     (numRuedas marca)
+;;     (#(struct:a-method-decl
+;;        init
+;;        (marca numRuedas)
+;;        #(struct:variableLocal-exp
+;;          (self.marca self.numRuedas)
+;;          (#(struct:var-exp marca) #(struct:var-exp numRuedas))
+;;          #(struct:tupla (#(struct:var-exp self.marca) #(struct:var-exp self.numRuedas)))))
+;;      #(struct:a-method-decl conducir (chofer) #(struct:var-exp chofer))))
+;;   #(struct:a-class-decl sedan carro (numPuertas) (#(struct:a-method-decl derrapar (chofer) #(struct:super-call-exp conducir (chofer))))))
+;;  #(struct:mostrar-exp)
+;;________________________________________________________________________________________________
+;; crear objecto
+(scan&parse "clase carro hereda objeto
+  campo numRuedas
+  campo marca
+  metodo init (marca, numRuedas){bloque{actualizar self.marca= marca ;actualizar self.numRuedas=numRuedas}}
+  metodo conducir(chofer) {chofer}
+clase sedan hereda carro
+  campo numPuertas
+  metodo derrapar(chofer){super conducir(chofer)}
+new carro(\"superCar\", 4)")
+;#(struct:a-program
+;  (#(struct:a-class-decl
+;     carro
+;     objeto
+;     (numRuedas marca)
+;     (#(struct:a-method-decl
+;        init
+;        (marca numRuedas)
+;        #(struct:block-exp #(struct:updateVar-exp self.marca #(struct:var-exp marca)) (#(struct:updateVar-exp self.numRuedas #(struct:var-exp numRuedas)))))
+;      #(struct:a-method-decl conducir (chofer) #(struct:var-exp chofer))))
+;   #(struct:a-class-decl sedan carro (numPuertas) (#(struct:a-method-decl derrapar (chofer) #(struct:super-call-exp conducir (chofer))))))
+;  #(struct:new-object-exp carro (#(struct:texto-lit "\"superCar\"") #(struct:numero-lit 4))))
