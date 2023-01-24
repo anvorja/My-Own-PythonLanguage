@@ -1,5 +1,12 @@
 #lang eopl
 
+;******************************************************************************************
+;;Andres Borja Muñoz
+;;Andres David Camargo
+;;Juan Jose Viafara Carabali
+;;Natalia Riaños Horta
+;;Marcelo García Millán
+;******************************************************************************************
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos y recursion
 
 ;; La definición BNF para las expresiones del lenguaje:
@@ -1201,8 +1208,21 @@
 (scan&parse "(6 mod 4)")
 (scan&parse "add1(9)")
 (scan&parse "sub1(10)")
+(scan&parse ">(6,5)")
+(scan&parse "<(6,5)")
+(scan&parse ">=(6,5)")
+(scan&parse "<=(6,5)")
+(scan&parse "==(1,1)")
+(scan&parse "<>(1,1)")
+(scan&parse "<>(1,3)")
 
-;;_____________________________________________________________________________
+;;________________________________________________________________________________________________________________________
+;Expresioens Boolenas
+(scan&parse "true")
+(scan&parse "<(8,9)")
+(scan&parse "or (<(1,0),>=(10,10))")
+
+;;________________________________________________________________________________________________________________________
 ;Numeros en base 32, hexadecimales, octales
 ;16 en hexadecimal es (0 1) porque ((0*16^0)+(1*16^1))= 16
 
@@ -1230,9 +1250,9 @@
 (scan&parse "sub1( base 16 (1))" )
 (scan&parse "add1( base 16 (1))" )
 
-;;_____________________________________________________________________________
-;;print(x)
-;;para prueba en el interprete se usa begin print("hola") ; print("mundo") end
+;;________________________________________________________________________________________________________________________
+;Print(x)
+;para prueba en el interprete se usa begin print("hola") ; print("mundo") end
 (scan&parse "begin print(\"hola\") ; print(\"mundo\") end")
 
 ;String
@@ -1242,57 +1262,80 @@
 (scan&parse "(\"hola\" concat \"mundo\")") ;"holamundo"
 (scan&parse "(\"6\" concat \"4\")") ;"64"
 
-;;_____________________________________________________________________________
-;;for
-(scan&parse "for x = 1 to 5 do print(x) done")
-(scan&parse "for x = 5 downto 1 do print(x) done")
-
-;;_____________________________________________________________________________
-;; expr-bool
-(scan&parse "true")
-(scan&parse "<(8,9)")
-(scan&parse "or (<(1,0),>=(10,10))")
-;;_____________________________________________________________________________
-;; lista
+;;________________________________________________________________________________________________________________________
+;Listas
 (scan&parse "[1;or (<(1,0),>=(10,10))]")
 (scan&parse "vacio?-lista([1;or (<(1,0),>=(10,10))])")
 (scan&parse "set-lista([1;or (<(1,0),>=(10,10))],1,9)")
-;;_____________________________________________________________________________
-;; tuplas
+(scan&parse "crear-lista(12,3,4)")
+(scan&parse "vacio?-lista(crear-lista())")
+(scan&parse "lista? ([2;3;1])")
+(scan&parse "lista? (crear-lista(53,1,6))")
+(scan&parse "lista? ([3;5;6])")
+(scan&parse "cabeza-lista ([3;5;6])")
+(scan&parse "cola-lista([3;5;6])")
+(scan&parse "append-lista ([3;5;6],[1;0;2])")
+(scan&parse "ref-lista ([3;5;6], 2)")
+(scan&parse "set-lista ([3;5;6],2 , 10)")
+
+;;________________________________________________________________________________________________________________________
+;Tuplas
+(scan&parse "tupla(1;2;3)")
 (scan&parse "ref-tupla(crear-tupla(1, 2, 4,and (<(10,5),>(1,90))),3)")
 (scan&parse "vacio?-tupla(tupla(1;or (<(1,0),>=(10,10))))")
 (scan&parse "tupla?(vacio-tupla())")
-(scan&parse "cabeza-tupla( cola-tupla(tupla(1;2;3;4;5)))")
-;;_____________________________________________________________________________
-;; registros
+(scan&parse "cabeza-tupla(cola-tupla(tupla(1;2;3;4;5)))")
+(scan&parse "cola-tupla(tupla(1;12;93))")
+
+;;________________________________________________________________________________________________________________________
+;Registros
 (scan&parse "crear-registro(f=5,t=4,ff=90)")
 (scan&parse "{f=5;t=4;ff=90}")
 (scan&parse "registros?({f=5;t=4;ff=90})")
 (scan&parse "ref-registro({f=5;t=4;ff=90}, ff)")
-;;_____________________________________________________________________________
-;; variables y constantes
-(scan&parse "variables
-(y=3){bloque{y; actualizar y = 3; y}}")
-;; --> 3
-(scan&parse "constantes(y=3){bloque{y; actualizar y = 3; y
-}}")
-;; --> error: no se pueden actualizar las constantes
-;;___________________________________________
 
+;;________________________________________________________________________________________________________________________
+;Expresion if
+(scan&parse "if >(12,3) then 3 else 1 endif")
+(scan&parse "if >=(1,1) then 4 else 2 endif")
+(scan&parse "if <>(9,9) then 99 else 100 endif")
+(scan&parse "if ==(9,9) then 99 else 100 endif")
+(scan&parse "if and(<>(7,1) , <(3,6)) then 999 else 0 endif")
+(scan&parse "if or(<>(6,6) , >(3,6)) then 1 else 10 endif")
+(scan&parse "if or(not(<>(6,6)) , >(3,6)) then 66 else 11 endif")
 
-;;___________________________________________
-;; procedimientos (recursivos y no recursivos)
-(scan&parse "variables (x = proc(a,b) {(a+b)}; y = 4) {invocar(x(9,y))}")
-;; --> 13
+;;________________________________________________________________________________________________________________________
+;Procedimientos (recursivos y no recursivos)
+(scan&parse "variables (x = proc(a,b) {(a+b)}; y = 4) {invocar(x(9,y))}") ; --> 13
 (scan&parse "letrec fact(n) = if ==(n,0) then 1 else (n * invocar( fact( (n~1) ) ) ) endif {invocar(fact(5))}")
-;; --> 120
-;;___________________________________________
-(interpretador)
+; --> 120
 
-;;_____________________________________________
-;; clases
+;;________________________________________________________________________________________________________________________
+;Estructura for
+(scan&parse "for x = 1 to 7 do print(x) done")
+(scan&parse "for x = 7 downto 1 do print(x) done")
+
+;;________________________________________________________________________________________________________________________
+;Estructura While
+(scan&parse "variables(a=10){while(>(a,0)) do bloque{print(a); actualizar a = sub1(a)} end}")
+
+;;________________________________________________________________________________________________________________________
+;Variables y constantes
+(scan&parse "variables(a=4){bloque{actualizar a=(a+9);a}}")
+(scan&parse "constantes(a=14){a}")
+(scan&parse "constantes(a=14){sub1(a)}")
+(scan&parse "constantes(a=4){bloque{sub1(a);a}}")              ;computa {sub1(a) y a no muta
+(scan&parse "variables(y=3){bloque{y; actualizar y = 3; y}}")  ; --> 3
+(scan&parse "constantes(y=3){bloque{y; actualizar y = 3; y}}") ; --> error: no se pueden actualizar las constantes
+(scan&parse "constantes(a = crear-lista(1,2, @true)){bloque{set-lista(a,1,10);a}}") ;-->#(1 10 #t)
+(scan&parse "variables(b = crear-lista()){bloque{for i = 1 to 5 do actualizar b = append-lista(b, [i]) done; b}}")
+(scan&parse "variables(b = crear-lista()){bloque{for i = 1 to 5 do actualizar b = append-lista(b, [(i*i)]) done; b}}")
+
+;;________________________________________________________________________________________________________________________
+;Clases
 (scan&parse "clase perro hereda objeto campo azucar metodo ladrar(y){y} mostrar")
 ;; --> (#(struct:a-class-decl perro objeto (azucar) (#(struct:a-method-decl ladrar (y) #(struct:var-exp y)))))
+
 (scan&parse "clase carro hereda objeto
   campo numRuedas
   campo marca
@@ -1302,23 +1345,24 @@ clase sedan hereda carro
   campo numPuertas
   metodo derrapar(chofer){super conducir(chofer)}
 mostrar")
-;; --> #(struct:a-program
-;;  (#(struct:a-class-decl
-;;     carro
-;;     objeto
-;;     (numRuedas marca)
-;;     (#(struct:a-method-decl
-;;        init
-;;        (marca numRuedas)
-;;        #(struct:variableLocal-exp
-;;          (self.marca self.numRuedas)
-;;          (#(struct:var-exp marca) #(struct:var-exp numRuedas))
-;;          #(struct:tupla (#(struct:var-exp self.marca) #(struct:var-exp self.numRuedas)))))
-;;      #(struct:a-method-decl conducir (chofer) #(struct:var-exp chofer))))
-;;   #(struct:a-class-decl sedan carro (numPuertas) (#(struct:a-method-decl derrapar (chofer) #(struct:super-call-exp conducir (chofer))))))
-;;  #(struct:mostrar-exp)
-;;________________________________________________________________________________________________
-;; crear objecto
+; --> #(struct:a-program
+;  (#(struct:a-class-decl
+;     carro
+;     objeto
+;     (numRuedas marca)
+;     (#(struct:a-method-decl
+;        init
+;        (marca numRuedas)
+;        #(struct:variableLocal-exp
+;          (self.marca self.numRuedas)
+;          (#(struct:var-exp marca) #(struct:var-exp numRuedas))
+;          #(struct:tupla (#(struct:var-exp self.marca) #(struct:var-exp self.numRuedas)))))
+;      #(struct:a-method-decl conducir (chofer) #(struct:var-exp chofer))))
+;   #(struct:a-class-decl sedan carro (numPuertas) (#(struct:a-method-decl derrapar (chofer) #(struct:super-call-exp conducir (chofer))))))
+;  #(struct:mostrar-exp)
+
+;;________________________________________________________________________________________________________________________
+;Crear objecto
 (scan&parse "clase carro hereda objeto
   campo numRuedas
   campo marca
@@ -1340,8 +1384,9 @@ new carro(\"superCar\", 4)")
 ;      #(struct:a-method-decl conducir (chofer) #(struct:var-exp chofer))))
 ;   #(struct:a-class-decl sedan carro (numPuertas) (#(struct:a-method-decl derrapar (chofer) #(struct:super-call-exp conducir (chofer))))))
 ;  #(struct:new-object-exp carro (#(struct:texto-lit "\"superCar\"") #(struct:numero-lit 4))))
-;___________________________________________________________________________________________________________________________________
-;; herencia
+
+;;________________________________________________________________________________________________________________________
+;Herencia
  (scan&parse "clase carro hereda objeto
   campo numRuedas
   campo marca
@@ -1354,7 +1399,42 @@ clase sedan hereda carro
   metodo derrapar(chofer){super conducir(chofer)}
 new sedan(2, 4)")
 
-;; usos
+;#(struct:a-program
+;  (#(struct:a-class-decl
+;     carro
+;     objeto
+;     (numRuedas marca)
+;     (#(struct:a-method-decl
+;        init
+;        (marca numRuedas)
+;        #(struct:block-exp
+;          #(struct:updateVar-exp self.marca #(struct:var-exp marca))
+;          (#(struct:updateVar-exp self.numRuedas #(struct:var-exp numRuedas)))))
+;      #(struct:a-method-decl conducir (chofer) #(struct:var-exp chofer))))
+;   #(struct:a-class-decl
+;     sedan
+;     carro
+;     (numPuertas)
+;     (#(struct:a-method-decl
+;        init
+;        (numPuertas numRuedas)
+;        #(struct:block-exp
+;          #(struct:updateVar-exp self.numPuertas #(struct:var-exp numPuertas))
+;          (#(struct:updateVar-exp self.numRuedas #(struct:var-exp numRuedas))
+;           #(struct:updateVar-exp self.marca #(struct:texto-lit "\"sedan\"")))))
+;      #(struct:a-method-decl
+;        caracteristicas
+;        ()
+;        #(struct:tupla
+;          (#(struct:var-exp self.numPuertas) #(struct:var-exp self.numRuedas))))
+;      #(struct:a-method-decl
+;        derrapar
+;        (chofer)
+;        #(struct:super-call-exp conducir (chofer))))))
+;  #(struct:new-object-exp sedan (#(struct:numero-lit 2) #(struct:numero-lit 4))))
+
+;;________________________________________________________________________________________________________________________
+;Usos
 (scan&parse "variables(a = crear-lista()){
                 bloque{
                    for x = 1 to 5 do
@@ -1363,3 +1443,9 @@ new sedan(2, 4)")
                    a}
                 }")
 (scan&parse "constantes(a= 1.1; b= crear-registro(p=5,r=2)){ref-registro(b,r)}")
+
+;;________________________________________________________________________________________________________________________
+
+(interpretador)
+
+;;________________________________________________________________________________________________________________________
