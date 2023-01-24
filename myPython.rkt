@@ -14,6 +14,10 @@
 ;;                      <lista (list-elements)>
 ;;                  ::= <list-prim>
 ;;                      <prim-list-exp (datum)>
+;;                  ::= <{ {<identificador> =<expresion>}+(;)}>
+;;                      <registro (first-id first-value rest-id rest-value)>
+;;                  ::= <regs-prim>
+;;                      <prim-registro-exp (regs-prim)>
 ;;                  ::= <identifier>
 ;;                      <var-exp (id)>
 ;;                  ::= <primitive> ({<expression>}*(,))
@@ -54,6 +58,14 @@
 ;;                      <prim-ref-list (list pos)>
 ;;                  ::= set-lista(<expression>,<expression>,<expression>)
 ;;                      <prim-ref-list (list pos value)>
+;; <regs-prim>      ::= registros?(<expression>)
+;;                      <prim-regs?-registro (exp)>
+;;                  ::= crear-registro({<identificador> =<expresion>}+(,))
+;;                      <prim-make-registro (first-id first-value rest-id rest-value)>
+;;                  ::= ref-registro(<expression>, <identifier>)
+;;                      <prim-ref-registro (exp id-exp)>
+;;                  ::= set-registro(<expression>, <identifier>,<expression>)
+;;                      <prim-set-registro (exp id-exp val)>
 ;; <pred-prim>      ::= < | > | <= | >= | == | <>
 ;; <oper-bin-bool>  ::= and|or
 ;; <oper-un-bool>   ::= not
@@ -99,8 +111,8 @@
     (expression (expr-bool) boolean-expr)
     (expression ("["(separated-list expression ";") "]") lista)
     (expression (list-prim) prim-list-exp)
-    (expression ("{"(separated-list expression ";") "}") lista)
-    (expression (list-prim) prim-list-exp)
+    (expression ("{"identifier "=" expression (arbno ";" identifier "=" expression) "}") registro)
+    (expression (regs-prim) prim-registro-exp)
     (expression ("Si" expression "entonces" expression "sino" expression "finSI") condicional-exp)
     (expression ("procedimiento" "(" (separated-list identifier ",") ")" "haga" expression "finProc") procedimiento-ex)
     (expression ("declarar" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") variableLocal-exp)
@@ -141,6 +153,11 @@
     (list-prim ("append-lista""("expression "," expression")") prim-append-list);append-lista([<elem1>,<elem2>,<elem3>,...],[<elemA>,<elemB>,<elemC>,...])-> <elem1>,<elem2>,<elem3>,...,<elemA>,<elemB>,<elemC>,...
     (list-prim ("ref-lista""("expression "," expression")") prim-ref-list);ref-lista(<lista>, pos)
     (list-prim ("set-lista""("expression "," expression "," expression ")") prim-set-list);set-lista(<lista>, pos, value)
+    ;;;;;;
+    (regs-prim ("registros?" "(" expression ")") prim-regs?-registro)
+    (regs-prim ("crear-registro" "(" identifier "=" expression (arbno "," identifier "=" expression) ")") prim-make-registro)
+    (regs-prim ("ref-registro" "(" expression ","expression ")") prim-ref-registro); ref-registro(<registro>,<id>) -> <value>
+    (regs-prim ("set-registro" "(" expression ","expression","expression ")") prim-set-registro); set-registro(<registro>,<id>, <new-value>)
   )
 )
 ;*******************************************************************************************
@@ -206,8 +223,10 @@
       (boolean-expr (datum) (eval-bool-exp datum env))
       (lista (list-elements)
              (list->vector (map (lambda (element) (eval-expression element env) ) list-elements)))
-
       (prim-list-exp (datum) (eval-prim-list datum env))
+      (registro (first-id first-value rest-id rest-value) (list (cons first-id rest-id)
+                                                                (list->vector (map (lambda (element) (eval-expression element env) ) (cons first-value rest-value)))))
+      (prim-registro-exp (regs-prim) (eval-regs-prim regs-prim env))
       (condicional-exp (test-exp true-exp false-exp)
           (if (valor-verdad? (eval-expression test-exp env))
             (eval-expression true-exp env)
@@ -269,8 +288,6 @@
       (prim-bool-disy () (or arg1 arg2))
       )))
 
-
-
 ;;funcion auxiliar, evalua las primitivas sobre listas
 (define eval-prim-list
   (lambda (primitiva env)
@@ -295,9 +312,40 @@
                                 (eopl:error 'eval-expression
                                  "index ~s out of range [0:~s)"  (eval-expression pos env) (vector-length (eval-expression list env)))
                                  (vector-set! (eval-expression list env) (eval-expression pos env) (eval-expression value env))))
-
-      (else 1)
     )))
+
+;;
+(define eval-regs-prim
+  (lambda (regs-primitive env)
+    (cases regs-prim regs-primitive
+      (prim-regs?-registro (exp) (let ((regs (eval-expression exp env)))
+                             (if (and (list? regs) (= (length regs) 2))
+                                 (if (and (vector? (cadr regs))
+                                          (= (length (car regs)) (vector-length (cadr regs))))
+                                     #t
+                                     #f)
+                                 #f)))
+      (prim-make-registro (first-id first-value rest-id rest-value) (list (cons first-id rest-id)
+                                                                (list->vector (map (lambda (element) (eval-expression element env) ) (cons first-value rest-value)))))
+      (prim-ref-registro (exp id-exp) (let ((regs (eval-expression exp env))
+                                        (ids (car (eval-expression exp env)))
+                                        (values (cadr (eval-expression exp env)))
+                                        (id (cases expression id-exp
+                                              (var-exp (datum) datum)
+                                              (else (eopl:error 'eval-expression "expression ~s is not an identifier" id-exp)))))
+                                    (if (number? (list-find-position id ids))
+                                        (vector-ref values (list-find-position id ids))
+                                        (eopl:error 'eval-expression "identifier ~s not found, available identifiers ~s" id ids))))
+      (prim-set-registro (exp id-exp val) (let ((regs (eval-expression exp env))
+                                        (ids (car (eval-expression exp env)))
+                                        (values (cadr (eval-expression exp env)))
+                                        (id (cases expression id-exp
+                                              (var-exp (datum) datum)
+                                              (else (eopl:error 'eval-expression "expression ~s is not an identifier" id-exp)))))
+                                    (if (number? (list-find-position id ids))
+                                        (vector-set! values (list-find-position id ids) (eval-expression val env))
+                                        (eopl:error 'eval-expression "identifier ~s not found, available identifiers ~s" id ids))))
+      (else 1))))
 
 
 ; funciones auxiliares para aplicar eval-expression a cada elemento de una
@@ -398,6 +446,7 @@
 ;función que busca un símbolo en un ambiente
 (define apply-env
   (lambda (env sym)
+
     (cases environment env
       (empty-env-record ()
                         (eopl:error 'apply-env "No binding for ~s" sym))
