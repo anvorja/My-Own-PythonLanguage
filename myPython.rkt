@@ -1,6 +1,4 @@
 #lang eopl
-
-;******************************************************************************************
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos y recursion
 
 ;; La definición BNF para las expresiones del lenguaje:
@@ -269,8 +267,8 @@
       (lista (list-elements)
              (list->vector (map (lambda (element) (eval-expression element env) ) list-elements)))
       (prim-list-exp (datum) (eval-prim-list datum env))
-      (tupla (elements)elements
-             (list->vector (map (lambda (element) (eval-expression element env) ) elements)))
+      (tupla (elements)
+             (map (lambda (element) (eval-expression element env) ) elements))
       (prim-tuple-exp(a) (eval-prim-tuple a env))
       (registro (first-id first-value rest-id rest-value) (list (cons first-id rest-id)
                                                                 (list->vector (map (lambda (element) (eval-expression element env) ) (cons first-value rest-value)))))
@@ -402,23 +400,23 @@
 (define eval-prim-tuple
   (lambda (primitiva env)
     (cases tuple-prim primitiva
-      (prim-make-empty-tuple () (make-vector 0))
-      (prim-empty-tuple (exp) (= (vector-length (eval-expression exp env)) 0))
-      (prim-make-tuple (tuple-elem) (list->vector(map (lambda (elem) (eval-expression elem env)) tuple-elem)))
-      (prim-tuple?-tuple (exp) (vector? (eval-expression exp env)))
-      (prim-head-tuple (exp) (if (= (vector-length (eval-expression exp env)) 0)
+      (prim-make-empty-tuple () (list))
+      (prim-empty-tuple (exp) (= (length (eval-expression exp env)) 0))
+      (prim-make-tuple (tuple-elem) (map (lambda (elem) (eval-expression elem env)) tuple-elem))
+      (prim-tuple?-tuple (exp) (list? (eval-expression exp env)))
+      (prim-head-tuple (exp) (if (= (length (eval-expression exp env)) 0)
                                 (eopl:error 'eval-expression
-                                 "cannot get the head of an empty list" )
-                                (vector-ref (eval-expression exp env) 0)))
+                                 "cannot get the head of an empty tuple" )
+                                (list-ref (eval-expression exp env) 0)))
 
-      (prim-tail-tuple (exp) (if (= (vector-length (eval-expression exp env)) 0)
-                                (make-vector 0)
-                                (list->vector(cdr (vector->list (eval-expression exp env))))))
+      (prim-tail-tuple (exp) (if (= (length (eval-expression exp env)) 0)
+                                (list)
+                                (cdr (eval-expression exp env))))
 
-     (prim-ref-tuple (tuple pos) (if (>= (eval-expression pos env) (vector-length (eval-expression tuple env)))
+     (prim-ref-tuple (tuple pos) (if (>= (eval-expression pos env) (length (eval-expression tuple env)))
                                 (eopl:error 'eval-expression
-                                 "index ~s out of range [0:~s)"  (eval-expression pos env) (vector-length (eval-expression tuple env)))
-                                (vector-ref (eval-expression tuple env) (eval-expression pos env))))
+                                 "index ~s out of range [0:~s)"  (eval-expression pos env) (length (eval-expression tuple env)))
+                                (list-ref (eval-expression tuple env) (eval-expression pos env))))
     )))
 
 
@@ -705,7 +703,7 @@
       (cond
         ((null? env)
          (eopl:error 'lookup-class
-           "Clase desconocida ~s" name))
+           "Class not known ~s" name))
         ((eqv? (class-decl->class-name (car env)) name) (car env))
         (else (loop (cdr env)))))))
 
