@@ -1,5 +1,4 @@
 #lang eopl
-
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos y recursion
 
 ;; La definición BNF para las expresiones del lenguaje:
@@ -22,16 +21,14 @@
 ;;                      <var-exp (id)>
 ;;                  ::= <primitive> ({<expression>}*(,))
 ;;                      <primapp-exp (prim rands)>
-;;                  ::= if <expression> then <expression> else <expression>
-;;                      <if-exp (exp1 exp2 exp23)>
-;;                  ::= let {identifier = <expression>}* in <expression>
-;;                      <let-exp (ids rands body)>
-;;                  ::= proc({<identificador>}*(,)) <expression>
+;;                  ::= if <expression> then <expression> else <expression> endif
+;;                      <if-exp (test-exp true-exp false-exp)>
+;;                  ::= proc({<identificador>}*(,)) { <expression> }
 ;;                      <proc-exp (ids body)>
-;;                  ::= (<expression> {<expression>}*)
+;;                  ::= letrec  {identifier ({identifier}*(,)) = <expression>}* { <expression> }
+;;                      <letrec-exp proc-names idss bodies letrec-body>
+;;                  ::= invocar(<expression> (<expression>)*(,))
 ;;                      <app-exp proc rands>
-;;                  ::= letrec  {identifier ({identifier}*(,)) = <expression>}* in <expression>
-;;                      <letrec-exp proc-names idss bodies bodyletrec>
 ;; <expr-bool>      ::= pred-prim ( expression , expression )
 ;;                      <comp-pred (pred-prim rand1 rand2)>
 ;;                  ::= oper-bin-bool ( expr-bool , expr-bool )
@@ -84,7 +81,7 @@
   (comment
    ("%" (arbno (not #\newline))) skip)
   (identifier
-   ("@"letter (arbno (or letter digit "?"))) symbol)
+   (letter (arbno (or letter digit "?"))) symbol)
   (bool
    ((or "true" "false")) symbol)
   (txt
@@ -115,13 +112,13 @@
     (expression (list-prim) prim-list-exp)
     (expression ("{"identifier "=" expression (arbno ";" identifier "=" expression) "}") registro)
     (expression (regs-prim) prim-registro-exp)
-    (expression ("Si" expression "entonces" expression "sino" expression "finSI") condicional-exp)
-    (expression ("procedimiento" "(" (separated-list identifier ",") ")" "haga" expression "finProc") procedimiento-ex)
+    (expression ("if" expression "then" expression "else" expression "endif") if-exp)
     (expression ("variables" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") variableLocal-exp)
     (expression ("constantes" "(" (separated-list identifier "=" expression ";") ")""{" expression "}") constanteLocal-exp)
-    (expression ("evaluar" expression "(" (separated-list expression ",") ")" "finEval") app-exp)
-    (expression ("letrec" (arbno identifier "(" (separated-list identifier ",") ")" "=" expression)  "in" expression) letrec-exp)
-    (expression ("new" identifier "(" (separated-list expression ",") ")") new-object-exp)
+    (expression ("proc" "(" (separated-list identifier ",") ")" "{" expression "}") proc-exp)
+    (expression ("letrec" (arbno identifier "(" (separated-list identifier ",") ")" "=" expression)  "{" expression "}") letrec-exp)
+    (expression ("invocar" "(" expression "(" (separated-list expression ",") ")" ")") app-exp)
+    (expression ("nuevo" identifier "(" (separated-list expression ",") ")") new-object-exp)
     ;;;;;;
     (expression ("actualizar" identifier "=" expression)
                 updateVar-exp)
@@ -169,8 +166,9 @@
     (regs-prim ("set-registro" "(" expression ","expression","expression ")") prim-set-registro); set-registro(<registro>,<id>, <new-value>)
 
     ;;;;;POO
-    (class-decl ("class" identifier "extends" identifier (arbno "field" identifier) (arbno method-decl)) a-class-decl)
-    (method-decl ("method" identifier "("  (separated-list identifier ",") ")" expression)a-method-decl)
+    (class-decl ("clase" identifier "hereda" identifier (arbno "prop" identifier) (arbno method-decl)) a-class-decl)
+    (method-decl ("metodo" identifier "("  (separated-list identifier ",") ")" "{" expression "}")a-method-decl)
+    (expression ("mostrar") mostrar-exp)
 
   )
 )
@@ -205,7 +203,7 @@
 (define init-env
   (lambda ()
     (extend-env
-     '(@x)
+     '(x)
      (list (direct-target 1))
 
      (empty-env))))
@@ -233,11 +231,11 @@
       (texto-lit (datum) (substring datum 1 (-(string-length datum) 1)))
       (var-exp (id) (apply-env  env id))
       (primapp-un-exp (prim rand)
-          (let ((arg (eval-rand rand env)))
+          (let ((arg (eval-primapp-exp-rand rand env)))
                (apply-uni-primitive prim arg)))
-      (primapp-bi-exp (rator prim rand)
-          (let((arg1 (eval-rator rator env))
-               (arg2 (eval-rand rand env)))
+      (primapp-bi-exp (rand1 prim rand2)
+          (let((arg1 (eval-primapp-exp-rand rand1 env))
+               (arg2 (eval-primapp-exp-rand rand2 env)))
                (apply-bi-primitive arg1 prim arg2)))
       (boolean-expr (datum) (eval-bool-exp datum env))
       (lista (list-elements)
@@ -246,11 +244,11 @@
       (registro (first-id first-value rest-id rest-value) (list (cons first-id rest-id)
                                                                 (list->vector (map (lambda (element) (eval-expression element env) ) (cons first-value rest-value)))))
       (prim-registro-exp (regs-prim) (eval-regs-prim regs-prim env))
-      (condicional-exp (test-exp true-exp false-exp)
+      (if-exp (test-exp true-exp false-exp)
           (if (valor-verdad? (eval-expression test-exp env))
             (eval-expression true-exp env)
             (eval-expression false-exp env)))
-      (procedimiento-ex (ids cuerpo)
+      (proc-exp (ids cuerpo)
           (cerradura ids cuerpo env))
       (app-exp (rator rands)
                (let((proc (eval-expression rator env))
@@ -293,6 +291,8 @@
                                    (extend-env-recursively proc-names idss bodies env)))
 
       (new-object-exp (id args) #t)
+
+      (mostrar-exp () the-class-env)
       (else 1))))
 
 
@@ -397,19 +397,23 @@
 
 ; funciones auxiliares para aplicar eval-expression a cada elemento de una
 ; lista de operandos (expresiones)
-(define eval-rators
-  (lambda (rators env)
-    (map (lambda (x) (eval-rators x env)) rators)))
-
-(define eval-rator
-  (lambda (rator env)
-    (eval-expression rator env)))
-
 (define eval-rands
   (lambda (rands env)
     (map (lambda (x) (eval-rand x env)) rands)))
 
 (define eval-rand
+  (lambda (rand env)
+    (cases expression rand
+      (var-exp (id)
+               (indirect-target
+                (let ((ref (apply-env-ref env id)))
+                  (cases target (primitive-deref ref)
+                    (direct-target (expval) ref)
+                    (indirect-target (ref1) ref1)))))
+      (else
+       (direct-target (eval-expression rand env))))))
+
+(define eval-primapp-exp-rand
   (lambda (rand env)
     (eval-expression rand env)))
 
@@ -444,7 +448,9 @@
 ;valor-verdad?: determina si un valor dado corresponde a un valor booleano falso o verdadero.
 (define valor-verdad?
   (lambda (x)
-    (not (zero? x))))
+    (if (eqv? x #t)
+        #t
+        #f)))
 
 ;*******************************************************************************************
 ;Procedimientos
@@ -530,13 +536,12 @@
 (define searchUpdateValExp
   (lambda (body)
     (cases expression body
-
       (numero-lit (datum) #f)
       (texto-lit (datum) #f)
       (var-exp (id) #f)
       (primapp-un-exp (prim rand)
           #f)
-      (primapp-bi-exp (rator prim rand)
+      (primapp-bi-exp (rand1 prim rand2)
           #f)
       (boolean-expr (datum) #f)
       (lista (list-elements)
@@ -544,9 +549,9 @@
       (prim-list-exp (datum) #f)
       (registro (first-id first-value rest-id rest-value) #f)
       (prim-registro-exp (regs-prim) #f)
-      (condicional-exp (test-exp true-exp false-exp)
+      (if-exp (test-exp true-exp false-exp)
           #f)
-      (procedimiento-ex (ids cuerpo)
+      (proc-exp (ids cuerpo)
           (searchUpdateValExp cuerpo))
       (app-exp (rator rands)
                #f)
@@ -562,27 +567,24 @@
                  (if (searchUpdateValExp exp)
                      #t
                      (let loop (
-                             (exps exps)
-                             )
+                                 (exps exps)
+                               )
                        (if (null? exps)
                            #f
                            (if (searchUpdateValExp (car exps))
-                           #t
-                           (loop (cdr exps))
-
-                        )
+                               #t
+                               (loop (cdr exps))
                            )
-
-                      )
-                    )
+                       )
+                     )
+                 )
         )
-
-
       (letrec-exp (proc-names idss bodies letrec-body)
                   (searchUpdateValExp letrec-body))
       (new-object-exp (id args) #f)
-    )
 
+      (mostrar-exp () #f)
+    )
   )
 )
 
@@ -624,6 +626,31 @@
               (vector-set! vec pos (direct-target (cerradura ids body env))))
             (iota len) idss bodies)
           env)))))
+
+;;Ambiente de declaracion de clases
+
+(define the-class-env '())
+
+(define elaborate-class-decls!
+  (lambda (c-decls)
+    (set! the-class-env c-decls)))
+
+(define lookup-class
+  (lambda (name)
+    (let loop ((env the-class-env))
+      (cond
+        ((null? env)
+         (eopl:error 'lookup-class
+           "Unknown class ~s" name))
+        ((eqv? (class-decl->class-name (car env)) name) (car env))
+        (else (loop (cdr env)))))))
+
+;;auxiliares para el manejo de clases
+(define class-decl->class-name
+  (lambda (c-decl)
+    (cases class-decl c-decl
+      (a-class-decl (class-name super-name field-ids m-decls)
+        class-name))))
 
 ;iota: number -> list
 ;función que retorna una lista de los números desde 0 hasta end
@@ -675,16 +702,6 @@
               (if (number? list-index-r)
                 (+ list-index-r 1)
                 #f))))))
-;;;;;;;;;;;;;;;; class environments ;;;;;;;;;;;;;;;;
-
-;;; we'll just use the list of class-decls.
-
-(define the-class-env '())
-
-(define elaborate-class-decls!
-  (lambda (c-decls)
-    (set! the-class-env c-decls)))
-
 
 
 ;******************************************************************************************
@@ -702,15 +719,28 @@
 (scan&parse "set-lista([1;or (<(1,0),>=(10,10))],1,9)")
 
 ;;___________________________________________
-;; registroa
-(scan&parse "crear-registro(@f=5,@t=4,@ff=90)")
-(scan&parse "{@f=5;@t=4;@ff=90}")
-(scan&parse "registros?({@f=5;@t=4;@ff=90})")
-(scan&parse "ref-registro({@f=5;@t=4;@ff=90}, @ff)")
+;; registros
+(scan&parse "crear-registro(f=5,t=4,ff=90)")
+(scan&parse "{f=5;t=4;ff=90}")
+(scan&parse "registros?({f=5;t=4;ff=90})")
+(scan&parse "ref-registro({f=5;t=4;ff=90}, ff)")
 
+;;___________________________________________
 ;; variables y constantes
 (scan&parse "variables
-(@y=3){bloque{@y; actualizar @y = 3; @y}}")
+(y=3){bloque{y; actualizar y = 3; y}}")
 ;; --> 3
-(scan&parse "constantes(@y=3){bloque{@y; actualizar @y = 3; @y
+(scan&parse "constantes(y=3){bloque{y; actualizar y = 3; y
 }}")
+;; --> error: no se pueden actualizar las constantes
+
+;;___________________________________________
+;; procedimientos (recursivos y no recursivos)
+(scan&parse "variables (x = proc(a,b) {(a+b)}; y = 4) {invocar(x(9,y))}")
+;; --> 13
+(scan&parse "letrec fact(n) = if ==(n,0) then 1 else (n * invocar( fact( (n~1) ) ) ) endif {invocar(fact(5))}")
+;; --> 120
+;;_____________________________________________
+;;Clases
+(scan&parse "clase perro hereda objeto prop azucar metodo ladrar(y){y} mostrar")
+;; --> (#(struct:a-class-decl perro objeto (azucar) (#(struct:a-method-decl ladrar (y) #(struct:var-exp y)))))
