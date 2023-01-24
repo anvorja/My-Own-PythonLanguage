@@ -1,6 +1,5 @@
 #lang eopl
 
-;******************************************************************************************
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos y recursion
 
 ;; La definición BNF para las expresiones del lenguaje:
