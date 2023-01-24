@@ -1,4 +1,5 @@
 #lang eopl
+
 ;******************************************************************************************
 ;;;;; Interpretador para lenguaje con condicionales, ligadura local, procedimientos y recursion
 
@@ -1097,3 +1098,16 @@ new carro(\"superCar\", 4)")
 ;      #(struct:a-method-decl conducir (chofer) #(struct:var-exp chofer))))
 ;   #(struct:a-class-decl sedan carro (numPuertas) (#(struct:a-method-decl derrapar (chofer) #(struct:super-call-exp conducir (chofer))))))
 ;  #(struct:new-object-exp carro (#(struct:texto-lit "\"superCar\"") #(struct:numero-lit 4))))
+;___________________________________________________________________________________________________________________________________
+;; herencia
+ (scan&parse "clase carro hereda objeto
+  campo numRuedas
+  campo marca
+  metodo init (marca, numRuedas){bloque{actualizar self.marca= marca ;actualizar self.numRuedas=numRuedas}}
+  metodo conducir(chofer) {chofer}
+clase sedan hereda carro
+  campo numPuertas
+  metodo init (numPuertas, numRuedas){bloque{actualizar self.numPuertas= numPuertas ;actualizar self.numRuedas=numRuedas; actualizar self.marca=\"sedan\"}}
+  metodo caracteristicas(){tupla(self.numPuertas;self.numRuedas)}
+  metodo derrapar(chofer){super conducir(chofer)}
+new sedan(2, 4)")
